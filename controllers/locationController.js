@@ -1,38 +1,19 @@
-import { calculateHaversineDistance, calculateDistanceWithGoogleMaps } from '../utils/distanceCalculator.js';
+import { calculateHaversineDistance, calculateDistanceWithGoogleMaps, getCoordinatesFromAddress, getAddressFromCoordinates } from '../utils/distanceCalculator.js';
 
 /**
- * Geocode address to precise coordinates using Nominatim
+ * Geocode address to precise coordinates using Google Geocoding API
  * Includes retry logic for temporary failures
  */
 const geocodeAddress = async (address, retries = 2) => {
-  const encoded = encodeURIComponent(address);
-  const url = `https://nominatim.openstreetmap.org/search?q=${encoded}&format=json&limit=1`;
-  
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
-      const response = await fetch(url, {
-        headers: { 'User-Agent': 'GoElectriQ/1.0 (Electric Cab Booking)' },
-      });
-      
-      if (!response.ok) {
-        if (response.status === 429 && attempt < retries - 1) {
-          // Rate limited - wait and retry
-          await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
-          continue;
-        }
-        throw new Error('Geocoding unavailable');
-      }
-      
-      const data = await response.json();
-      if (!data || data.length === 0) throw new Error('Address not found');
-      
-      const lat = parseFloat(data[0].lat);
-      const lon = parseFloat(data[0].lon);
-      return { lat: parseFloat(lat.toFixed(8)), lon: parseFloat(lon.toFixed(8)) };
+      const result = await getCoordinatesFromAddress(address);
+      return { lat: result.latitude, lon: result.longitude };
     } catch (error) {
-      if (attempt === retries - 1) throw error;
+      if (attempt === retries - 1) throw new Error(`Geocoding failed for "${address}": ${error.message}`);
       // Wait before retrying
       await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
+      console.log(`Geocoding retry ${attempt + 1}/${retries - 1} for "${address}"`);
     }
   }
 };
@@ -179,7 +160,7 @@ export const estimateDistance = async (req, res) => {
 
 /**
  * Reverse geocode coordinates to human-readable address
- * Uses OpenStreetMap Nominatim API (no API key required)
+ * Uses Google Geocoding API (Reverse Geocoding)
  */
 export const reverseGeocode = async (req, res) => {
   try {
@@ -209,51 +190,26 @@ export const reverseGeocode = async (req, res) => {
       });
     }
 
-    const url = `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json&addressdetails=1&zoom=18`;
+    console.log(`🔄 Reverse geocoding: ${latitude}, ${longitude}`);
+    
+    const result = await getAddressFromCoordinates(latitude, longitude);
+    
+    console.log(`✅ Reverse geocoding successful: ${result.formattedAddress}`);
 
-    const response = await fetch(url, {
-      headers: {
-        'Accept-Language': 'en',
-        'User-Agent': 'GoElectriQ/1.0 (Electric Cab Booking)',
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error('Geocoding service unavailable');
-    }
-
-    const data = await response.json();
-
-    const address = data?.address;
-    let displayAddress = data?.display_name || '';
-
-    if (address) {
-      const parts = [
-        address.house_number,
-        address.road,
-        address.suburb || address.neighbourhood || address.quarter,
-        address.village || address.town || address.city || address.municipality || address.county,
-        address.state,
-        address.postcode,
-        address.country,
-      ].filter(Boolean);
-      displayAddress = parts.join(', ') || displayAddress;
-    }
-
-    res.json({
+    return res.json({
       success: true,
       data: {
-        address: displayAddress,
-        lat: latitude,
-        lon: longitude,
-        raw: data,
+        address: result.formattedAddress,
+        placeId: result.placeId,
+        addressComponents: result.addressComponents,
       },
     });
-  } catch (err) {
-    console.error('Reverse geocode error:', err.message);
-    res.status(500).json({
+  } catch (error) {
+    console.error('❌ Reverse geocoding error:', error.message);
+    return res.status(500).json({
       success: false,
-      message: err.message || 'Failed to get address from coordinates',
+      message: 'Reverse geocoding failed',
+      error: error.message,
     });
   }
 };
@@ -262,11 +218,11 @@ export const reverseGeocode = async (req, res) => {
  * Google Places Autocomplete Proxy
  * GET /api/location/google-places/autocomplete?input=...
  * Proxies requests to Google Places API to avoid CORS issues
- * Now searches all of India without location/radius restrictions
+ * Fixed: Proper India location bias and input validation
  */
 export const googlePlacesAutocomplete = async (req, res) => {
   try {
-    const {
+    let {
       input,
       components = 'country:in',
       language = 'en',
@@ -274,12 +230,18 @@ export const googlePlacesAutocomplete = async (req, res) => {
       radius,
       strictbounds,
     } = req.query;
+
+    // Trim input
+    input = input?.trim();
     const apiKey = process.env.GOOGLE_SERVER_KEY;
 
-    if (!input || input.length < 1) {
+    // ✅ INPUT VALIDATION: Prevent too short queries
+    if (!input || input.length < 2) {
+      console.warn(`⚠️ Google Places: Input too short "${input}"`);
       return res.status(400).json({
         success: false,
-        message: 'Input must be at least 1 character',
+        message: 'Input must be at least 2 characters',
+        predictions: [],
       });
     }
 
@@ -290,42 +252,54 @@ export const googlePlacesAutocomplete = async (req, res) => {
       });
     }
 
-    console.log(`🔍 Google Places Search: "${input}" in ${components}`);
+    console.log(`🔍 Google Places Search: "${input}" (components: ${components})`);
 
+    // Build URL with proper parameters
     const url = new URL('https://maps.googleapis.com/maps/api/place/autocomplete/json');
     url.searchParams.append('input', input);
     url.searchParams.append('key', apiKey);
     url.searchParams.append('components', components); // Restrict to India
     url.searchParams.append('language', language);
-    if (location) {
-      url.searchParams.append('location', location);
-    }
-    if (radius) {
-      url.searchParams.append('radius', radius);
-    }
-    if (strictbounds !== undefined) {
-      url.searchParams.append('strictbounds', strictbounds);
-    }
+
+    // ✅ Set default location bias to India center if not provided
+    const defaultLocation = location || '20.5937,78.9629'; // India center
+    const defaultRadius = radius || '2000000'; // ~2000km to cover all India
+    
+    url.searchParams.append('location', defaultLocation);
+    url.searchParams.append('radius', defaultRadius);
+    
+    // ✅ Force results within India boundaries
+    url.searchParams.append('strictbounds', 'true');
+
+    console.log(`📍 Location bias: ${defaultLocation}, Radius: ${defaultRadius}m`);
 
     const response = await fetch(url.toString());
 
     if (!response.ok) {
-      throw new Error('Google Places API error');
+      throw new Error(`Google API returned ${response.status}`);
     }
 
     const data = await response.json();
 
-    console.log(`✅ Google Places returned ${data.predictions?.length || 0} predictions`);
+    // Log the status and results
+    if (data.status === 'OK') {
+      console.log(`✅ Google Places returned ${data.predictions?.length || 0} predictions`);
+    } else if (data.status === 'ZERO_RESULTS') {
+      console.warn(`⚠️ Google Places returned ZERO_RESULTS for "${input}"`);
+    } else {
+      console.warn(`⚠️ Google Places status: ${data.status}`, data.error_message);
+    }
 
     res.json({
       success: true,
       data: data,
     });
   } catch (err) {
-    console.error('Google Places autocomplete error:', err.message);
+    console.error('❌ Google Places autocomplete error:', err.message);
     res.status(500).json({
       success: false,
       message: err.message || 'Failed to fetch Google Places predictions',
+      predictions: [],
     });
   }
 };
