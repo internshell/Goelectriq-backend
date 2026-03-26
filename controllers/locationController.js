@@ -1,3 +1,4 @@
+import axios from 'axios';
 import { calculateHaversineDistance, calculateDistanceWithGoogleMaps, getCoordinatesFromAddress, getAddressFromCoordinates } from '../utils/distanceCalculator.js';
 
 /**
@@ -221,87 +222,120 @@ export const reverseGeocode = async (req, res) => {
  * Fixed: Proper India location bias and input validation
  */
 export const googlePlacesAutocomplete = async (req, res) => {
-  try {
-    let {
-      input,
-      components = 'country:in',
-      language = 'en',
-      location,
-      radius,
-      strictbounds,
-    } = req.query;
+  const maxRetries = 3;
+  let lastError = null;
 
-    // Trim input
-    input = input?.trim();
-    const apiKey = process.env.GOOGLE_SERVER_KEY;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      let {
+        input,
+        components = 'country:in',
+        language = 'en',
+        location,
+        radius,
+        strictbounds,
+      } = req.query;
 
-    // ✅ INPUT VALIDATION: Prevent too short queries
-    if (!input || input.length < 2) {
-      console.warn(`⚠️ Google Places: Input too short "${input}"`);
-      return res.status(400).json({
-        success: false,
-        message: 'Input must be at least 2 characters',
-        predictions: [],
+      // Trim input
+      input = input?.trim();
+      const apiKey = process.env.GOOGLE_SERVER_KEY;
+
+      // ✅ INPUT VALIDATION: Prevent too short queries
+      if (!input || input.length < 2) {
+        console.warn(`⚠️ Google Places: Input too short "${input}"`);
+        return res.status(400).json({
+          success: false,
+          message: 'Input must be at least 2 characters',
+          predictions: [],
+        });
+      }
+
+      if (!apiKey) {
+        return res.status(500).json({
+          success: false,
+          message: 'Google Maps API key not configured on server',
+        });
+      }
+
+      console.log(`🔍 Google Places Search (Attempt ${attempt + 1}/${maxRetries}): "${input}" (components: ${components})`);
+
+      // Build params object
+      const params = {
+        input: input,
+        key: apiKey,
+        components: components, // Restrict to India
+        language: language,
+      };
+
+      // ✅ Set default location bias to India center if not provided
+      const defaultLocation = location || '20.5937,78.9629'; // India center
+      const defaultRadius = radius || '2000000'; // ~2000km to cover all India
+      
+      params.location = defaultLocation;
+      params.radius = defaultRadius;
+      
+      // ✅ Force results within India boundaries
+      params.strictbounds = 'true';
+
+      console.log(`📍 Location bias: ${defaultLocation}, Radius: ${defaultRadius}m`);
+
+      // ✅ Use axios with timeout and retry config
+      const response = await axios.get(
+        'https://maps.googleapis.com/maps/api/place/autocomplete/json',
+        {
+          params: params,
+          timeout: 8000, // 8 second timeout
+          headers: {
+            'User-Agent': 'GoElectriQ/1.0',
+          },
+        }
+      );
+
+      const data = response.data;
+
+      // Log the status and results
+      if (data.status === 'OK') {
+        console.log(`✅ Google Places returned ${data.predictions?.length || 0} predictions`);
+      } else if (data.status === 'ZERO_RESULTS') {
+        console.warn(`⚠️ Google Places returned ZERO_RESULTS for "${input}"`);
+      } else {
+        console.warn(`⚠️ Google Places status: ${data.status}`, data.error_message);
+      }
+
+      return res.json({
+        success: true,
+        data: data,
       });
+    } catch (err) {
+      lastError = err;
+      console.error(`❌ Google Places autocomplete error (Attempt ${attempt + 1}/${maxRetries}):`, err.message);
+      
+      // Don't retry on input validation errors
+      if (err.response?.status === 400) {
+        return res.status(400).json({
+          success: false,
+          message: err.message || 'Invalid request to Google Places API',
+          predictions: [],
+        });
+      }
+
+      // Wait before retrying (exponential backoff)
+      if (attempt < maxRetries - 1) {
+        const waitTime = 1000 * Math.pow(2, attempt);
+        console.log(`⏳ Retrying in ${waitTime}ms...`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      }
     }
-
-    if (!apiKey) {
-      return res.status(500).json({
-        success: false,
-        message: 'Google Maps API key not configured on server',
-      });
-    }
-
-    console.log(`🔍 Google Places Search: "${input}" (components: ${components})`);
-
-    // Build URL with proper parameters
-    const url = new URL('https://maps.googleapis.com/maps/api/place/autocomplete/json');
-    url.searchParams.append('input', input);
-    url.searchParams.append('key', apiKey);
-    url.searchParams.append('components', components); // Restrict to India
-    url.searchParams.append('language', language);
-
-    // ✅ Set default location bias to India center if not provided
-    const defaultLocation = location || '20.5937,78.9629'; // India center
-    const defaultRadius = radius || '2000000'; // ~2000km to cover all India
-    
-    url.searchParams.append('location', defaultLocation);
-    url.searchParams.append('radius', defaultRadius);
-    
-    // ✅ Force results within India boundaries
-    url.searchParams.append('strictbounds', 'true');
-
-    console.log(`📍 Location bias: ${defaultLocation}, Radius: ${defaultRadius}m`);
-
-    const response = await fetch(url.toString());
-
-    if (!response.ok) {
-      throw new Error(`Google API returned ${response.status}`);
-    }
-
-    const data = await response.json();
-
-    // Log the status and results
-    if (data.status === 'OK') {
-      console.log(`✅ Google Places returned ${data.predictions?.length || 0} predictions`);
-    } else if (data.status === 'ZERO_RESULTS') {
-      console.warn(`⚠️ Google Places returned ZERO_RESULTS for "${input}"`);
-    } else {
-      console.warn(`⚠️ Google Places status: ${data.status}`, data.error_message);
-    }
-
-    res.json({
-      success: true,
-      data: data,
-    });
-  } catch (err) {
-    console.error('❌ Google Places autocomplete error:', err.message);
-    res.status(500).json({
-      success: false,
-      message: err.message || 'Failed to fetch Google Places predictions',
-      predictions: [],
-    });
   }
+
+  // All retries failed
+  console.error(`❌ Google Places API failed after ${maxRetries} attempts:`, lastError?.message);
+  res.status(500).json({
+    success: false,
+    message: lastError?.message || 'Failed to fetch Google Places predictions after multiple retries',
+    predictions: [],
+    error: lastError?.code,
+  });
 };
 
 /**
@@ -310,46 +344,76 @@ export const googlePlacesAutocomplete = async (req, res) => {
  * Proxies requests to Google Places Details API to avoid CORS issues
  */
 export const googlePlacesDetails = async (req, res) => {
-  try {
-    const { place_id } = req.query;
-    const apiKey = process.env.GOOGLE_SERVER_KEY;
+  const maxRetries = 2;
+  let lastError = null;
 
-    if (!place_id) {
-      return res.status(400).json({
-        success: false,
-        message: 'Place ID is required',
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const { place_id } = req.query;
+      const apiKey = process.env.GOOGLE_SERVER_KEY;
+
+      if (!place_id) {
+        return res.status(400).json({
+          success: false,
+          message: 'Place ID is required',
+        });
+      }
+
+      if (!apiKey) {
+        return res.status(500).json({
+          success: false,
+          message: 'Google Maps API key not configured on server',
+        });
+      }
+
+      const params = {
+        place_id: place_id,
+        key: apiKey,
+        fields: 'geometry,formatted_address,name,address_components',
+      };
+
+      const response = await axios.get(
+        'https://maps.googleapis.com/maps/api/place/details/json',
+        {
+          params: params,
+          timeout: 8000,
+          headers: {
+            'User-Agent': 'GoElectriQ/1.0',
+          },
+        }
+      );
+
+      const data = response.data;
+
+      return res.json({
+        success: true,
+        data: data,
       });
+    } catch (err) {
+      lastError = err;
+      console.error(`❌ Google Places details error (Attempt ${attempt + 1}/${maxRetries}):`, err.message);
+
+      // Don't retry on input validation errors
+      if (err.response?.status === 400) {
+        return res.status(400).json({
+          success: false,
+          message: err.message || 'Invalid request to Google Places API',
+        });
+      }
+
+      // Wait before retrying
+      if (attempt < maxRetries - 1) {
+        const waitTime = 1000 * Math.pow(2, attempt);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      }
     }
-
-    if (!apiKey) {
-      return res.status(500).json({
-        success: false,
-        message: 'Google Maps API key not configured on server',
-      });
-    }
-
-    const url = new URL('https://maps.googleapis.com/maps/api/place/details/json');
-    url.searchParams.append('place_id', place_id);
-    url.searchParams.append('key', apiKey);
-    url.searchParams.append('fields', 'geometry,formatted_address,name,address_components');
-
-    const response = await fetch(url.toString());
-
-    if (!response.ok) {
-      throw new Error('Google Places API error');
-    }
-
-    const data = await response.json();
-
-    res.json({
-      success: true,
-      data: data,
-    });
-  } catch (err) {
-    console.error('Google Places details error:', err.message);
-    res.status(500).json({
-      success: false,
-      message: err.message || 'Failed to fetch place details',
-    });
   }
+
+  // All retries failed
+  console.error(`❌ Google Places Details API failed after ${maxRetries} attempts:`, lastError?.message);
+  res.status(500).json({
+    success: false,
+    message: lastError?.message || 'Failed to fetch place details after multiple retries',
+    error: lastError?.code,
+  });
 };

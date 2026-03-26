@@ -26,11 +26,26 @@ export const createBooking = async (req, res) => {
       distance,
     } = req.body;
 
+    console.log('📥 Creating booking with payload:', {
+      pickupLocation,
+      dropLocation,
+      cabType,
+      scheduledDate,
+      scheduledTime,
+      distance,
+    });
+
     // Validate required fields
     if (!pickupLocation || !dropLocation || !cabType) {
+      console.error('❌ Validation failed:', {
+        pickupLocation: Boolean(pickupLocation),
+        dropLocation: Boolean(dropLocation),
+        cabType: Boolean(cabType),
+      });
       return res.status(400).json({
         success: false,
         message: 'pickupLocation, dropLocation, and cabType are required',
+        received: { pickupLocation, dropLocation, cabType },
       });
     }
 
