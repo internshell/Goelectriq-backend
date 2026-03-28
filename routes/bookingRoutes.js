@@ -5,10 +5,15 @@ import {
   getBookingById,
   cancelBooking,
   downloadInvoice,
+  confirmBooking,
+  completeBooking,
+  collectPayment,
+  getAllBookings,
 } from '../controllers/bookingController.js';
 import { protect } from '../middleware/auth.js';
 import { bookingLimiter } from '../middleware/rateLimiter.js';
 import { validateObjectId } from '../middleware/validation.js';
+import { authorize } from '../middleware/roleCheck.js';
 
 const router = express.Router();
 
@@ -25,5 +30,30 @@ router.route('/:id')
 
 router.put('/:id/cancel', validateObjectId('id'), cancelBooking);
 router.get('/:id/invoice', validateObjectId('id'), downloadInvoice);
+
+// ===== ADMIN ROUTES (All require admin role) =====
+router.get('/admin/all-bookings', authorize('admin'), getAllBookings);
+
+// Admin actions for bookings
+router.put(
+  '/:id/confirm',
+  authorize('admin'),
+  validateObjectId('id'),
+  confirmBooking
+);
+
+router.put(
+  '/:id/complete',
+  authorize('admin'),
+  validateObjectId('id'),
+  completeBooking
+);
+
+router.post(
+  '/:id/collect-payment',
+  authorize('admin'),
+  validateObjectId('id'),
+  collectPayment
+);
 
 export default router;

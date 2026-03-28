@@ -302,6 +302,8 @@ export const verifyRidePayment = async (req, res) => {
       paymentId 
     } = req.body;
     
+    console.log('🔍 Verifying payment:', { paymentId, razorpay_payment_id });
+    
     // Verify signature
     const isSignatureValid = verifyRazorpaySignature(
       razorpay_order_id,
@@ -319,11 +321,14 @@ export const verifyRidePayment = async (req, res) => {
     // Find payment record
     const payment = await Payment.findById(paymentId);
     if (!payment) {
+      console.error('❌ Payment record not found:', paymentId);
       return res.status(404).json({
         success: false,
         message: 'Payment record not found'
       });
     }
+    
+    console.log('✅ Payment found:', { paymentId, bookingId: payment.booking });
     
     // Fetch payment details from Razorpay
     const paymentDetails = await fetchPaymentDetails(razorpay_payment_id);
@@ -333,6 +338,17 @@ export const verifyRidePayment = async (req, res) => {
     payment.razorpaySignature = razorpay_signature;
     payment.status = paymentDetails.status === 'captured' ? 'success' : 'failed';
     payment.paidAt = new Date();
+    
+    // Map Razorpay method to valid payment method enum
+    const methodMap = {
+      'upi': 'upi',
+      'netbanking': 'razorpay',
+      'card': 'razorpay',
+      'wallet': 'wallet',
+      'emandate': 'razorpay'
+    };
+    payment.paymentMethod = methodMap[paymentDetails.method] || 'razorpay';
+    
     payment.paymentDetails = {
       method: paymentDetails.method,
       email: paymentDetails.email,
@@ -343,14 +359,92 @@ export const verifyRidePayment = async (req, res) => {
     };
     
     await payment.save();
+    console.log('✅ Payment record saved:', { status: payment.status });
     
-    // Update booking payment status
+    // Update booking payment status with payment details
     if (payment.booking) {
       const booking = await Booking.findById(payment.booking);
+      console.log('🔍 Found booking:', { bookingId: payment.booking, bookingExists: !!booking });
+      
       if (booking) {
+        // Check if this is a remaining payment (partial payment that completes the total)
+        const totalFare = booking.pricing?.totalFare || 0;
+        const previousPayments = await Payment.find({
+          booking: booking._id,
+          status: 'success',
+          _id: { $ne: payment._id } // Exclude current payment
+        });
+        
+        const previousPaidAmount = previousPayments.reduce((sum, p) => sum + p.amount, 0);
+        const totalPaidNow = previousPaidAmount + payment.amount;
+        const isRemainingPaymentComplete = totalPaidNow >= totalFare;
+        
+        console.log('💰 Payment Analysis:', {
+          totalFare,
+          previousPaidAmount,
+          currentPayment: payment.amount,
+          totalPaidNow,
+          isRemainingPaymentComplete
+        });
+
         booking.paymentStatus = payment.status === 'success' ? 'paid' : 'failed';
-        booking.status = payment.status === 'success' ? 'confirmed' : 'pending';
+        
+        // IMPORTANT: Status flow:
+        // 1. Initial booking created = pending
+        // 2. First payment (initial deposit) = confirmed
+        // 3. Remaining payment completes total = completed
+        // 4. Stay confirmed until remaining payment is done
+        
+        if (payment.status === 'success') {
+          if (isRemainingPaymentComplete) {
+            // All payments complete → Mark as COMPLETED
+            booking.status = 'completed';
+            console.log('✅ Booking marked as COMPLETED - Full payment received (₹' + totalPaidNow + '/' + totalFare + ')');
+          } else {
+            // Partial payment (initial or intermediate) → Keep/Mark as CONFIRMED
+            // Only update to confirmed if not already completed
+            if (booking.status !== 'completed') {
+              booking.status = 'confirmed';
+              console.log('⏳ Booking marked as CONFIRMED - Waiting for remaining payment (₹' + totalPaidNow + '/' + totalFare + ')');
+            }
+          }
+        } else {
+          // Payment failed
+          booking.status = 'pending';
+          console.log('❌ Booking status reset to PENDING - Payment failed');
+        }
+        
+        // Map payment method to Booking enum (online, cash, wallet)
+        const bookingMethodMap = {
+          'upi': 'online',
+          'card': 'online',
+          'netbanking': 'online',
+          'emandate': 'online',
+          'cash': 'cash',
+          'wallet': 'wallet'
+        };
+        booking.paymentMethod = bookingMethodMap[paymentDetails.method] || 'online';
+        
+        // Save payment details to booking
+        booking.paymentDetails = {
+          razorpayOrderId: razorpay_order_id,
+          razorpayPaymentId: razorpay_payment_id,
+          razorpaySignature: razorpay_signature,
+          paidAt: new Date(),
+          method: paymentDetails.method,
+          amount: payment.amount,
+          totalPaidAmount: totalPaidNow,
+        };
+        
         await booking.save();
+        console.log('✅ Booking updated:', { 
+          bookingId: booking._id, 
+          status: booking.status,
+          paymentStatus: booking.paymentStatus,
+          totalPaidAmount: totalPaidNow
+        });
+      } else {
+        console.error('❌ Booking not found for payment:', payment.booking);
       }
     }
     
@@ -360,12 +454,19 @@ export const verifyRidePayment = async (req, res) => {
       data: {
         paymentId: payment._id,
         bookingId: payment.booking,
-        status: payment.status
+        status: payment.status,
+        paymentDetails: {
+          method: paymentDetails.method,
+          amount: payment.amount,
+          email: paymentDetails.email,
+          contact: paymentDetails.contact,
+          paidAt: payment.paidAt
+        }
       }
     });
     
   } catch (error) {
-    console.error('Ride payment verification error:', error);
+    console.error('❌ Ride payment verification error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -432,6 +533,8 @@ export const verifyTourPayment = async (req, res) => {
       paymentId 
     } = req.body;
     
+    console.log('🔍 Verifying tour payment:', { paymentId, razorpay_payment_id });
+    
     const isSignatureValid = verifyRazorpaySignature(
       razorpay_order_id,
       razorpay_payment_id,
@@ -447,11 +550,14 @@ export const verifyTourPayment = async (req, res) => {
     
     const payment = await Payment.findById(paymentId);
     if (!payment) {
+      console.error('❌ Tour payment record not found:', paymentId);
       return res.status(404).json({
         success: false,
         message: 'Payment record not found'
       });
     }
+    
+    console.log('✅ Tour payment found:', { paymentId, tourBookingId: payment.tourBooking });
     
     const paymentDetails = await fetchPaymentDetails(razorpay_payment_id);
     
@@ -469,13 +575,43 @@ export const verifyTourPayment = async (req, res) => {
     };
     
     await payment.save();
-    
+    console.log('✅ Tour payment record saved:', { status: payment.status });
+
     if (payment.tourBooking) {
       const booking = await TourBooking.findById(payment.tourBooking);
+      console.log('🔍 Found tour booking:', { bookingId: payment.tourBooking, bookingExists: !!booking });
+      
       if (booking) {
         booking.paymentStatus = payment.status === 'success' ? 'paid' : 'failed';
         booking.status = payment.status === 'success' ? 'confirmed' : 'pending';
+        
+        // Map payment method to TourBooking enum (online, cash, wallet)
+        const tourMethodMap = {
+          'upi': 'online',
+          'card': 'online',
+          'netbanking': 'online',
+          'emandate': 'online',
+          'cash': 'cash',
+          'wallet': 'wallet'
+        };
+        booking.paymentMethod = tourMethodMap[paymentDetails.method] || 'online';
+        
+        // Save payment details to tour booking
+        booking.paymentDetails = {
+          razorpayOrderId: razorpay_order_id,
+          razorpayPaymentId: razorpay_payment_id,
+          razorpaySignature: razorpay_signature,
+          paidAt: new Date(),
+        };
+        
         await booking.save();
+        console.log('✅ Tour booking updated:', { 
+          bookingId: booking._id, 
+          paymentStatus: booking.paymentStatus,
+          paymentDetails: booking.paymentDetails
+        });
+      } else {
+        console.error('❌ Tour booking not found for payment:', payment.tourBooking);
       }
     }
     
@@ -490,7 +626,7 @@ export const verifyTourPayment = async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Tour payment verification error:', error);
+    console.error('❌ Tour payment verification error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -502,12 +638,21 @@ export const getPaymentHistory = async (req, res) => {
     const skip = (page - 1) * limit;
 
     const payments = await Payment.find({ user: req.user._id })
+      .populate({
+        path: 'booking',
+        select: 'bookingId pickupLocation dropLocation cabType rideType pricing distance',
+      })
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(parseInt(limit))
-      .populate('booking', 'bookingId pickupLocation dropLocation cabType pricing');
+      .limit(parseInt(limit));
 
     const total = await Payment.countDocuments({ user: req.user._id });
+
+    console.log('📋 Payment History Fetched:', {
+      userId: req.user._id,
+      count: payments.length,
+      hasBookingData: payments.map(p => ({ id: p._id, hasBooking: !!p.booking }))
+    });
 
     res.status(200).json({
       success: true,
@@ -520,6 +665,7 @@ export const getPaymentHistory = async (req, res) => {
       },
     });
   } catch (error) {
+    console.error('❌ Error in getPaymentHistory:', error.message);
     res.status(500).json({ success: false, message: error.message });
   }
 };

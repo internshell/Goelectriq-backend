@@ -192,6 +192,7 @@ export const createPackage = async (req, res) => {
       durationDays,
       durationHours,
       coverImage,
+      pricing,
     } = req.body;
     if (!title || !description || !tourCategory) {
       return res.status(400).json({
@@ -206,6 +207,23 @@ export const createPackage = async (req, res) => {
       });
     }
     const price = basePrice ? Number(basePrice) : 0;
+    
+    // Handle pricing - map form fields to schema fields
+    // Form sends: mini, sedan, suv
+    // Schema expects: hatchback, sedan, suv, luxury
+    const pricingData = pricing && (pricing.mini || pricing.sedan || pricing.suv)
+      ? {
+          hatchback: pricing.mini ? Number(pricing.mini) : price,
+          sedan: pricing.sedan ? Number(pricing.sedan) : price,
+          suv: pricing.suv ? Number(pricing.suv) : price,
+        }
+      : { 
+          hatchback: price, 
+          sedan: price + 200, 
+          suv: price + 500, 
+          luxury: price + 1000,
+        };
+    
     const pkg = await Package.create({
       title,
       description,
@@ -219,7 +237,7 @@ export const createPackage = async (req, res) => {
         hours: durationHours ? Number(durationHours) : 0,
       },
       coverImage: coverImage || '',
-      pricing: { sedan: price, suv: price + 500, hatchback: price + 200, luxury: price + 1000 },
+      pricing: pricingData,
       discount: req.body.discountPercent ? { percentage: Number(req.body.discountPercent), validFrom: new Date(), validTill: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000) } : undefined,
       isActive: true,
     });
@@ -266,7 +284,7 @@ export const getAdminTourBookings = async (req, res) => {
 
     const tourBookings = await TourBooking.find(query)
       .populate('user', 'name email phone')
-      .populate('package', 'title coverImage tourCategory location')
+      .populate('package', 'title coverImage tourCategory location basePrice pricing')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit);
@@ -313,15 +331,108 @@ export const updateTourBookingStatus = async (req, res) => {
 };
 
 /**
+ * Get actual payment history for a tour booking (admin)
+ */
+export const getTourBookingPayments = async (req, res) => {
+  try {
+    const { tourBookingId } = req.params;
+    
+    // Find all payments linked to this tour booking
+    const payments = await Payment.find({ tourBooking: tourBookingId })
+      .select('amount paymentMethod status paidAt transactionId razorpayPaymentId')
+      .sort({ createdAt: -1 });
+    
+    // Calculate total paid
+    const totalPaid = payments
+      .filter(p => p.status === 'success')
+      .reduce((sum, p) => sum + (p.amount || 0), 0);
+    
+    console.log(`💳 Payment History for Tour Booking ${tourBookingId}:`, {
+      totalPaid,
+      paymentCount: payments.length,
+      payments: payments.map(p => ({
+        amount: p.amount,
+        status: p.status,
+        method: p.paymentMethod,
+        paidAt: p.paidAt
+      }))
+    });
+    
+    res.status(200).json({
+      success: true,
+      data: {
+        totalActualPaid: totalPaid,
+        payments,
+        paymentCount: payments.length,
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching tour booking payments:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
  * Update package (admin)
  */
 export const updatePackage = async (req, res) => {
   try {
     const { id } = req.params;
-    const allowed = ['title', 'description', 'shortDescription', 'tourCategory', 'location', 'basePrice', 'coverImage', 'isActive'];
+    const allowed = ['title', 'description', 'shortDescription', 'tourCategory', 'location', 'basePrice', 'coverImage', 'isActive', 'pricing'];
+    
+    // Fetch existing package first to preserve data during merge
+    const existingPackage = await Package.findById(id);
+    if (!existingPackage) {
+      return res.status(404).json({ success: false, message: 'Package not found' });
+    }
+    
     const updates = {};
     for (const k of allowed) {
-      if (req.body[k] !== undefined) updates[k] = k === 'basePrice' ? Number(req.body[k]) : req.body[k];
+      if (req.body[k] !== undefined) {
+        if (k === 'basePrice') {
+          updates[k] = Number(req.body[k]);
+        } else if (k === 'pricing') {
+          // Handle pricing object - map form fields to schema fields
+          // Form sends: mini, sedan, suv
+          // Schema expects: hatchback, sedan, suv, luxury
+          const updates_pricing = {
+            hatchback: undefined,
+            sedan: undefined,
+            suv: undefined,
+            luxury: undefined,
+          };
+          
+          // Keep existing values
+          if (existingPackage.pricing) {
+            updates_pricing.hatchback = existingPackage.pricing.hatchback;
+            updates_pricing.sedan = existingPackage.pricing.sedan;
+            updates_pricing.suv = existingPackage.pricing.suv;
+            updates_pricing.luxury = existingPackage.pricing.luxury;
+          }
+          
+          // Update with new values from form
+          if (req.body[k].mini !== undefined && req.body[k].mini !== null && req.body[k].mini !== '') {
+            updates_pricing.hatchback = Number(req.body[k].mini);
+          }
+          if (req.body[k].sedan !== undefined && req.body[k].sedan !== null && req.body[k].sedan !== '') {
+            updates_pricing.sedan = Number(req.body[k].sedan);
+          }
+          if (req.body[k].suv !== undefined && req.body[k].suv !== null && req.body[k].suv !== '') {
+            updates_pricing.suv = Number(req.body[k].suv);
+          }
+          
+          // Remove undefined fields
+          Object.keys(updates_pricing).forEach(key => {
+            if (updates_pricing[key] === undefined) {
+              delete updates_pricing[key];
+            }
+          });
+          
+          updates[k] = updates_pricing;
+        } else {
+          updates[k] = req.body[k];
+        }
+      }
     }
     
     // Handle duration fields
@@ -340,7 +451,6 @@ export const updatePackage = async (req, res) => {
       };
     }
     const pkg = await Package.findByIdAndUpdate(id, updates, { new: true });
-    if (!pkg) return res.status(404).json({ success: false, message: 'Package not found' });
     res.status(200).json({ success: true, data: pkg });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -778,6 +888,214 @@ export const bulkUpdateAdminPricingRates = async (req, res) => {
     });
   } catch (error) {
     console.error('Error in bulkUpdateAdminPricingRates:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * @desc    Get all pending ride bookings for admin approval
+ * @route   GET /api/admin/ride-bookings/pending
+ * @access  Private/Admin
+ */
+export const getPendingRideBookings = async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const skip = (page - 1) * limit;
+
+    const bookings = await Booking.find({ 'adminApproval.status': 'pending' })
+      .populate('user', 'name email phone profileImage')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    const total = await Booking.countDocuments({ 'adminApproval.status': 'pending' });
+
+    res.status(200).json({
+      success: true,
+      data: {
+        bookings,
+        pagination: {
+          total,
+          page,
+          pages: Math.ceil(total / limit),
+        },
+      },
+    });
+  } catch (error) {
+    console.error('Error in getPendingRideBookings:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * @desc    Approve a ride booking by admin
+ * @route   PATCH /api/admin/ride-bookings/:id/approve
+ * @access  Private/Admin
+ */
+export const approveRideBooking = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const adminId = req.user.id; // Admin user ID from auth middleware
+
+    const booking = await Booking.findById(id).populate('user');
+
+    if (!booking) {
+      return res.status(404).json({ success: false, message: 'Booking not found' });
+    }
+
+    // Update the booking approval status
+    booking.adminApproval.status = 'approved';
+    booking.adminApproval.approvedBy = adminId;
+    booking.adminApproval.approvedAt = new Date();
+    booking.status = 'confirmed'; // Set booking status to confirmed when admin approves
+
+    await booking.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Booking approved successfully',
+      data: booking,
+    });
+  } catch (error) {
+    console.error('Error in approveRideBooking:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * @desc    Reject a ride booking by admin
+ * @route   PATCH /api/admin/ride-bookings/:id/reject
+ * @access  Private/Admin
+ */
+export const rejectRideBooking = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { rejectionReason } = req.body;
+    const adminId = req.user.id;
+
+    if (!rejectionReason || rejectionReason.trim() === '') {
+      return res.status(400).json({ success: false, message: 'Rejection reason is required' });
+    }
+
+    const booking = await Booking.findById(id).populate('user');
+
+    if (!booking) {
+      return res.status(404).json({ success: false, message: 'Booking not found' });
+    }
+
+    // Update the booking rejection status
+    booking.adminApproval.status = 'rejected';
+    booking.adminApproval.approvedBy = adminId;
+    booking.adminApproval.approvedAt = new Date();
+    booking.adminApproval.rejectionReason = rejectionReason;
+    booking.status = 'cancelled'; // Set booking status to cancelled when admin rejects
+
+    await booking.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Booking rejected successfully',
+      data: booking,
+    });
+  } catch (error) {
+    console.error('Error in rejectRideBooking:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * @desc    Mark a ride as completed by admin (after payment received)
+ * @route   PATCH /api/admin/ride-bookings/:id/complete
+ * @access  Private/Admin
+ */
+export const completeRideBooking = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { completionNotes } = req.body;
+    const adminId = req.user.id;
+
+    const booking = await Booking.findById(id)
+      .populate('user')
+      .populate('pricing');
+
+    if (!booking) {
+      return res.status(404).json({ success: false, message: 'Booking not found' });
+    }
+
+    // Update the ride completion details
+    booking.rideCompletion.completedAt = new Date();
+    booking.rideCompletion.completedBy = adminId;
+    booking.rideCompletion.completionNotes = completionNotes || '';
+    booking.status = 'completed';
+    
+    // Mark payment as paid when ride is completed (handles manual payments too)
+    booking.paymentStatus = 'paid';
+
+    await booking.save();
+
+    // Detect payment method from completion notes
+    const notesLower = (completionNotes || '').toLowerCase();
+    let paymentMethod = 'cash'; // Default to cash for manual payments
+    
+    if (notesLower.includes('upi') || notesLower.includes('online') || notesLower.includes('razorpay')) {
+      paymentMethod = 'razorpay';
+    } else if (notesLower.includes('wallet')) {
+      paymentMethod = 'wallet';
+    }
+
+    // Check if payment already exists for this booking
+    let existingPayment = await Payment.findOne({ booking: booking._id });
+    
+    if (!existingPayment) {
+      // Create payment record for manual completion
+      const payment = new Payment({
+        booking: booking._id,
+        user: booking.user._id,
+        amount: booking.totalFare || 0,
+        currency: 'INR',
+        paymentMethod: paymentMethod,
+        paymentType: 'ride_booking',
+        status: 'success',
+        transactionId: `MANUAL_${booking.bookingId}_${Date.now()}`,
+      });
+
+      await payment.save();
+
+      console.log('💳 Payment record created for manual completion:', {
+        paymentId: payment._id,
+        bookingId: booking.bookingId,
+        method: paymentMethod,
+        amount: booking.totalFare,
+      });
+    } else {
+      // Update existing payment record
+      existingPayment.paymentMethod = paymentMethod;
+      existingPayment.status = 'success';
+      await existingPayment.save();
+
+      console.log('💳 Payment record updated for manual completion:', {
+        paymentId: existingPayment._id,
+        bookingId: booking.bookingId,
+        method: paymentMethod,
+      });
+    }
+
+    console.log('✅ Ride completed:', {
+      bookingId: booking.bookingId,
+      status: booking.status,
+      paymentStatus: booking.paymentStatus,
+      paymentMethod: paymentMethod,
+      notes: completionNotes
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Ride marked as completed successfully',
+      data: booking,
+    });
+  } catch (error) {
+    console.error('❌ Error in completeRideBooking:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };

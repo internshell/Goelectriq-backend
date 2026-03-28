@@ -12,6 +12,7 @@ import {
   getAdminPackages,
   getAdminTourBookings,
   updateTourBookingStatus,
+  getTourBookingPayments,
   updatePackage,
   deletePackage,
   getAdminFeedback,
@@ -30,6 +31,10 @@ import {
   getAdminPricingRates,
   updateAdminPricingRate,
   bulkUpdateAdminPricingRates,
+  getPendingRideBookings,
+  approveRideBooking,
+  rejectRideBooking,
+  completeRideBooking,
 } from '../controllers/adminController.js';
 
 const router = express.Router();
@@ -56,8 +61,15 @@ router.get('/bookings', getAllBookings);
 router.delete('/bookings/:id', deleteBookingAdmin);
 router.patch('/bookings/:id/status', updateBookingStatusAdmin);
 
+// ============ RIDE BOOKINGS MANAGEMENT (NEW APPROVAL FLOW) ============
+router.get('/ride-bookings/pending', getPendingRideBookings);
+router.patch('/ride-bookings/:id/approve', approveRideBooking);
+router.patch('/ride-bookings/:id/reject', rejectRideBooking);
+router.patch('/ride-bookings/:id/complete', completeRideBooking);
+
 // ============ TOUR BOOKINGS MANAGEMENT ============
 router.get('/tour-bookings', getAdminTourBookings);
+router.get('/tour-bookings/:tourBookingId/payments', getTourBookingPayments);
 router.patch('/tour-bookings/:id', updateTourBookingStatus);
 router.delete('/tour-bookings/:id', deleteTourBookingAdmin);
 

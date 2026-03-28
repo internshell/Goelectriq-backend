@@ -60,6 +60,12 @@ const bookingSchema = new mongoose.Schema(
       enum: ['mini', 'sedan', 'suv', 'hatchback', 'luxury'],
       required: true,
     },
+    rideType: {
+      type: String,
+      enum: ['local', 'airport', 'intercity'],
+      default: 'local',
+      description: 'Type of ride for payment rule application',
+    },
     scheduledDate: {
       type: Date,
       required: true,
@@ -122,8 +128,19 @@ const bookingSchema = new mongoose.Schema(
     },
     paymentStatus: {
       type: String,
-      enum: ['pending', 'paid', 'failed', 'refunded'],
+      enum: ['pending', 'partial', 'paid', 'failed', 'refunded'],
       default: 'pending',
+    },
+    paidAmount: {
+      type: Number,
+      default: 0,
+      description: 'Amount user has already paid',
+    },
+    paymentSchedule: {
+      type: String,
+      enum: ['full_on_completion', 'advance_20_on_booking'],
+      default: 'full_on_completion',
+      description: 'When payment should be collected',
     },
     paymentMethod: {
       type: String,
@@ -211,6 +228,30 @@ const bookingSchema = new mongoose.Schema(
     },
     notes: String,
     adminNotes: String,
+    adminApproval: {
+      status: {
+        type: String,
+        enum: ['pending', 'approved', 'rejected'],
+        default: 'pending',
+        description: 'Admin approval status for the booking',
+      },
+      approvedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        default: null,
+      },
+      approvedAt: Date,
+      rejectionReason: String,
+    },
+    rideCompletion: {
+      completedAt: Date,
+      completedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        default: null,
+      },
+      completionNotes: String,
+    },
   },
   {
     timestamps: true,
@@ -226,6 +267,13 @@ bookingSchema.pre('save', async function () {
     const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
     this.bookingId = `ECB${year}${month}${random}`;
   }
+});
+
+// Virtual field for remaining amount
+bookingSchema.virtual('remainingAmount').get(function () {
+  const totalFare = this.pricing?.totalFare || 0;
+  const paidAmount = this.paidAmount || 0;
+  return Math.max(0, totalFare - paidAmount);
 });
 
 // Index for faster queries (bookingId already has unique: true in schema)

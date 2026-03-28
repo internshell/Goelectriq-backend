@@ -41,6 +41,7 @@ const normalizePricing = (priceDoc) => ({
   minimumFare: priceDoc.minimumFare,
   gstPercentage: priceDoc.gstPercentage,
   isActive: priceDoc.isActive,
+  maxPassengers: priceDoc.capacity?.passengers || 4,
   updatedAt: priceDoc.updatedAt,
 });
 
@@ -117,7 +118,7 @@ router.get('/app/rates', async (req, res) => {
         id: p.cabType,
         name: p.displayName,
         baseRate: p.perKmRate,
-        maxPassengers: p.maxPassengers || 4,
+        maxPassengers: p.capacity?.passengers || 4,
         description: `₹${p.perKmRate}/km`,
       }));
     } else {
@@ -166,11 +167,14 @@ router.post('/app/rates', async (req, res) => {
           cabType: rate.id,
           displayName: rate.name,
           perKmRate: rate.baseRate,
-          maxPassengers: rate.maxPassengers || 4,
+          capacity: {
+            passengers: rate.maxPassengers || 4,
+            luggage: 2,
+          },
           isActive: true,
           updatedAt: new Date(),
         },
-        { upsert: true, new: true }
+        { upsert: true, new: true, returnDocument: 'after' }
       );
       updated.push(result);
     }
@@ -182,7 +186,7 @@ router.post('/app/rates', async (req, res) => {
         id: u.cabType,
         name: u.displayName,
         baseRate: u.perKmRate,
-        maxPassengers: u.maxPassengers,
+        maxPassengers: u.capacity?.passengers || 4,
       })),
     });
   } catch (error) {

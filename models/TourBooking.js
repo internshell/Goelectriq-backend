@@ -60,6 +60,17 @@ const tourBookingSchema = new mongoose.Schema(
       enum: ['pending', 'paid', 'partial', 'failed', 'refunded'],
       default: 'pending',
     },
+    paymentMethod: {
+      type: String,
+      enum: ['online', 'cash', 'wallet'],
+      default: 'online',
+    },
+    paymentDetails: {
+      razorpayOrderId: String,
+      razorpayPaymentId: String,
+      razorpaySignature: String,
+      paidAt: Date,
+    },
     notes: String,
     adminNotes: String,
   },
