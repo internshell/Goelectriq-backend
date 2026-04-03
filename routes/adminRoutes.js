@@ -31,6 +31,7 @@ import {
   getAdminPricingRates,
   updateAdminPricingRate,
   bulkUpdateAdminPricingRates,
+  updateAirportRidePricing,
   getPendingRideBookings,
   approveRideBooking,
   rejectRideBooking,
@@ -95,5 +96,6 @@ router.get('/payments', getAllPaymentsAdmin);
 router.get('/pricing/rates', getAdminPricingRates);
 router.patch('/pricing/rates/:rateId', updateAdminPricingRate);
 router.post('/pricing/rates/bulk', bulkUpdateAdminPricingRates);
+router.patch('/pricing/airport/:cabType', updateAirportRidePricing);
 
 export default router;

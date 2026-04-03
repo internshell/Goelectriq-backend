@@ -8,8 +8,8 @@ import Payment from '../models/Payment.js';
 import Pricing from '../models/Pricing.js';
 
 const defaultPricingConfig = {
-  mini: {
-    displayName: 'Mini Car',
+  economy: {
+    displayName: 'Economy',
     description: 'Compact and economical',
     passengers: 4,
     luggage: 2,
@@ -17,17 +17,8 @@ const defaultPricingConfig = {
     perKmRate: 10,
     minimumFare: 100,
   },
-  sedan: {
-    displayName: 'Sedan',
-    description: 'Comfortable and spacious',
-    passengers: 4,
-    luggage: 3,
-    baseFare: 75,
-    perKmRate: 14,
-    minimumFare: 150,
-  },
-  suv: {
-    displayName: 'SUV',
+  premium: {
+    displayName: 'Premium',
     description: 'Premium and luxurious',
     passengers: 6,
     luggage: 4,
@@ -209,19 +200,16 @@ export const createPackage = async (req, res) => {
     const price = basePrice ? Number(basePrice) : 0;
     
     // Handle pricing - map form fields to schema fields
-    // Form sends: mini, sedan, suv
-    // Schema expects: hatchback, sedan, suv, luxury
-    const pricingData = pricing && (pricing.mini || pricing.sedan || pricing.suv)
+    // Form sends: economy, premium
+    // Schema expects: economy, premium
+    const pricingData = pricing && (pricing.economy || pricing.premium)
       ? {
-          hatchback: pricing.mini ? Number(pricing.mini) : price,
-          sedan: pricing.sedan ? Number(pricing.sedan) : price,
-          suv: pricing.suv ? Number(pricing.suv) : price,
+          economy: pricing.economy ? Number(pricing.economy) : price,
+          premium: pricing.premium ? Number(pricing.premium) : price,
         }
       : { 
-          hatchback: price, 
-          sedan: price + 200, 
-          suv: price + 500, 
-          luxury: price + 1000,
+          economy: price, 
+          premium: price + 500,
         };
     
     const pkg = await Package.create({
@@ -393,32 +381,25 @@ export const updatePackage = async (req, res) => {
           updates[k] = Number(req.body[k]);
         } else if (k === 'pricing') {
           // Handle pricing object - map form fields to schema fields
-          // Form sends: mini, sedan, suv
-          // Schema expects: hatchback, sedan, suv, luxury
+          // Form sends: economy, premium
+          // Schema expects: economy, premium
           const updates_pricing = {
-            hatchback: undefined,
-            sedan: undefined,
-            suv: undefined,
-            luxury: undefined,
+            economy: undefined,
+            premium: undefined,
           };
           
           // Keep existing values
           if (existingPackage.pricing) {
-            updates_pricing.hatchback = existingPackage.pricing.hatchback;
-            updates_pricing.sedan = existingPackage.pricing.sedan;
-            updates_pricing.suv = existingPackage.pricing.suv;
-            updates_pricing.luxury = existingPackage.pricing.luxury;
+            updates_pricing.economy = existingPackage.pricing.economy;
+            updates_pricing.premium = existingPackage.pricing.premium;
           }
           
           // Update with new values from form
-          if (req.body[k].mini !== undefined && req.body[k].mini !== null && req.body[k].mini !== '') {
-            updates_pricing.hatchback = Number(req.body[k].mini);
+          if (req.body[k].economy !== undefined && req.body[k].economy !== null && req.body[k].economy !== '') {
+            updates_pricing.economy = Number(req.body[k].economy);
           }
-          if (req.body[k].sedan !== undefined && req.body[k].sedan !== null && req.body[k].sedan !== '') {
-            updates_pricing.sedan = Number(req.body[k].sedan);
-          }
-          if (req.body[k].suv !== undefined && req.body[k].suv !== null && req.body[k].suv !== '') {
-            updates_pricing.suv = Number(req.body[k].suv);
+          if (req.body[k].premium !== undefined && req.body[k].premium !== null && req.body[k].premium !== '') {
+            updates_pricing.premium = Number(req.body[k].premium);
           }
           
           // Remove undefined fields
@@ -758,7 +739,7 @@ export const getAdminPricingRates = async (req, res) => {
     const pricingRates = await Pricing.find({ cabType: { $in: Object.keys(defaultPricingConfig) } })
       .sort({ cabType: 1 });
 
-    const order = ['mini', 'sedan', 'suv'];
+    const order = ['economy', 'premium'];
     const orderedRates = order
       .map((cabType) => pricingRates.find((item) => item.cabType === cabType))
       .filter(Boolean);
@@ -778,7 +759,7 @@ export const updateAdminPricingRate = async (req, res) => {
     const { rateId } = req.params;
     const { name, baseRate, maxPassengers, description } = req.body;
 
-    if (!['mini', 'sedan', 'suv'].includes(rateId)) {
+    if (!['economy', 'premium'].includes(rateId)) {
       return res.status(400).json({ success: false, message: 'Invalid rate id' });
     }
 
@@ -842,7 +823,7 @@ export const bulkUpdateAdminPricingRates = async (req, res) => {
 
     for (const rateData of rates) {
       const rateId = rateData.id;
-      if (!['mini', 'sedan', 'suv'].includes(rateId)) {
+      if (!['economy', 'premium'].includes(rateId)) {
         continue;
       }
 
@@ -888,6 +869,80 @@ export const bulkUpdateAdminPricingRates = async (req, res) => {
     });
   } catch (error) {
     console.error('Error in bulkUpdateAdminPricingRates:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * @desc    Update airport ride charges (fixed charge & parking charge)
+ * @route   PATCH /api/admin/pricing/airport/:cabType
+ * @access  Private/Admin
+ */
+export const updateAirportRidePricing = async (req, res) => {
+  try {
+    const { cabType } = req.params;
+    const { fixedCharge, parkingCharge } = req.body;
+
+    // Validate car type
+    if (!['economy', 'premium'].includes(cabType)) {
+      return res.status(400).json({ success: false, message: 'Invalid car type' });
+    }
+
+    // Validate input
+    if (fixedCharge === undefined || parkingCharge === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: 'Fixed charge and parking charge are required',
+      });
+    }
+
+    const parsedFixed = Number(fixedCharge);
+    const parsedParking = Number(parkingCharge);
+
+    if (!Number.isFinite(parsedFixed) || parsedFixed < 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Fixed charge must be a valid non-negative number',
+      });
+    }
+
+    if (!Number.isFinite(parsedParking) || parsedParking < 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Parking charge must be a valid non-negative number',
+      });
+    }
+
+    // Update in database
+    const updated = await Pricing.findOneAndUpdate(
+      { cabType },
+      {
+        fixedCharge: parsedFixed,
+        parkingCharge: parsedParking,
+        updatedAt: new Date(),
+      },
+      { new: true, runValidators: true }
+    );
+
+    if (!updated) {
+      return res.status(404).json({
+        success: false,
+        message: 'Pricing not found for this car type',
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Airport charges updated successfully',
+      data: {
+        id: updated.cabType,
+        name: updated.displayName,
+        fixedCharge: updated.fixedCharge,
+        parkingCharge: updated.parkingCharge,
+      },
+    });
+  } catch (error) {
+    console.error('Error in updateAirportRidePricing:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };

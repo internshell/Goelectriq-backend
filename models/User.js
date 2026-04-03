@@ -22,6 +22,8 @@ const userSchema = new mongoose.Schema(
     },
     phone: {
       type: String,
+      required: [true, 'Please provide a mobile number'],
+      unique: true,
       trim: true,
       sparse: true,
       match: [/^[6-9]\d{9}$/, 'Please provide a valid 10-digit phone number'],
@@ -30,6 +32,10 @@ const userSchema = new mongoose.Schema(
       type: String,
       minlength: [6, 'Password must be at least 6 characters'],
       select: false,
+      required: function() {
+        // Password required only if not using social login
+        return !this.googleId;
+      },
     },
     googleId: {
       type: String,

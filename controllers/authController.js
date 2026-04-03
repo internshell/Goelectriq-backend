@@ -21,6 +21,7 @@ export const registerUser = async (req, res) => {
   try {
     const { name, email, phone, password } = req.body;
 
+    // Validate required fields
     if (!name || !email || !phone || !password) {
       return res.status(400).json({
         success: false,
@@ -28,7 +29,8 @@ export const registerUser = async (req, res) => {
       });
     }
 
-    if (password.length < 6) {
+    // Validate password length
+    if (String(password).length < 6) {
       return res.status(400).json({
         success: false,
         message: 'Password must be at least 6 characters',
@@ -37,14 +39,21 @@ export const registerUser = async (req, res) => {
 
     // Normalize phone to 10 digits (Indian format)
     const phoneClean = String(phone).replace(/\D/g, '').slice(-10);
-    if (phoneClean.length !== 10 || !/^[6-9]/.test(phoneClean)) {
+    if (phoneClean.length !== 10) {
       return res.status(400).json({
         success: false,
-        message: 'Please provide a valid 10-digit mobile number (starting with 6-9)',
+        message: 'Please provide a valid 10-digit mobile number',
       });
     }
 
-    const emailLower = email.toLowerCase().trim();
+    if (!/^[6-9]/.test(phoneClean)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Mobile number should start with 6-9',
+      });
+    }
+
+    const emailLower = String(email).toLowerCase().trim();
 
     // Check if user already exists
     const userExists = await User.findOne({
@@ -52,18 +61,24 @@ export const registerUser = async (req, res) => {
     });
 
     if (userExists) {
+      if (userExists.email === emailLower) {
+        return res.status(400).json({
+          success: false,
+          message: 'User with this email already exists',
+        });
+      }
       return res.status(400).json({
         success: false,
-        message: 'User with this email or phone already exists',
+        message: 'User with this phone number already exists',
       });
     }
 
     // Create user
     const user = await User.create({
-      name: name.trim(),
+      name: String(name).trim(),
       email: emailLower,
       phone: phoneClean,
-      password,
+      password: String(password),
       role: 'user',
     });
 
@@ -104,9 +119,11 @@ export const registerUser = async (req, res) => {
 
     // MongoDB duplicate key
     if (error.code === 11000) {
+      const field = Object.keys(error.keyPattern)[0];
+      const fieldName = field === 'email' ? 'email' : 'phone number';
       return res.status(400).json({
         success: false,
-        message: 'User with this email or phone already exists',
+        message: `User with this ${fieldName} already exists`,
       });
     }
 
@@ -130,7 +147,15 @@ export const loginUser = async (req, res) => {
     if (!email || !password) {
       return res.status(400).json({
         success: false,
-        message: 'Please provide email and password',
+        message: 'Please provide both email and password',
+      });
+    }
+
+    // Validate email format
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide a valid email address',
       });
     }
 
@@ -142,7 +167,7 @@ export const loginUser = async (req, res) => {
     if (!user) {
       return res.status(401).json({
         success: false,
-        message: 'Invalid credentials',
+        message: 'Invalid email or password',
       });
     }
 
@@ -160,11 +185,14 @@ export const loginUser = async (req, res) => {
     if (!isPasswordValid) {
       return res.status(401).json({
         success: false,
-        message: 'Invalid credentials',
+        message: 'Invalid email or password',
       });
     }
 
     // Generate token
+    if (!process.env.JWT_SECRET) {
+      throw new Error('JWT_SECRET is not configured. Add it to your .env file.');
+    }
     const token = generateToken(user._id, user.role);
 
     res.status(200).json({
@@ -188,8 +216,7 @@ export const loginUser = async (req, res) => {
     console.error('Login error:', error);
     res.status(500).json({
       success: false,
-      message: 'Error logging in',
-      error: error.message,
+      message: error.message || 'Error logging in',
     });
   }
 };

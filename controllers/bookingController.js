@@ -140,14 +140,11 @@ export const createBooking = async (req, res) => {
     // If pricing not found, create default pricing based on cab type
     if (!pricing) {
       const defaultPricing = {
-        mini: { baseFare: 50, perKmRate: 10, minimumFare: 100 },
-        sedan: { baseFare: 75, perKmRate: 14, minimumFare: 150 },
-        suv: { baseFare: 100, perKmRate: 18, minimumFare: 200 },
-        hatchback: { baseFare: 60, perKmRate: 12, minimumFare: 120 },
-        luxury: { baseFare: 150, perKmRate: 25, minimumFare: 300 },
+        economy: { baseFare: 50, perKmRate: 10, minimumFare: 100 },
+        premium: { baseFare: 100, perKmRate: 18, minimumFare: 200 },
       };
       
-      const priceData = defaultPricing[cabType] || defaultPricing.sedan;
+      const priceData = defaultPricing[cabType] || defaultPricing.economy;
       pricing = {
         cabType,
         baseFare: priceData.baseFare,
@@ -160,12 +157,46 @@ export const createBooking = async (req, res) => {
       };
     }
 
-    // Calculate fare
-    const fareBreakdown = calculateFare(
-      pricing,
-      distanceData.distance,
-      `${scheduledDate} ${scheduledTime}`
-    );
+    // ===== STAGE 5: CALCULATE FARE =====
+    let fareBreakdown;
+    
+    if (rideType === 'airport') {
+      // Airport rides use distance-based pricing: (Per-km Rate × Distance) + Parking Charge
+      console.log('✈️  Airport ride detected - Using distance-based pricing');
+      
+      const perKmRate = pricing.fixedCharge || 0; // Field renamed for airport rides
+      const parkingCharge = pricing.parkingCharge || 0;
+      const distanceFare = Math.round(perKmRate * distanceData.distance);
+      const subTotal = distanceFare + parkingCharge;
+      const gst = Math.round(subTotal * (pricing.gstPercentage / 100));
+      const totalFare = subTotal + gst;
+      
+      fareBreakdown = {
+        perKmRate,
+        distanceFare,
+        parkingCharge,
+        subTotal,
+        gst,
+        totalFare,
+        breakdownDetails: {
+          formula: `(${perKmRate}/km × ${distanceData.distance}km) + ${parkingCharge} = ${subTotal}`,
+          components: {
+            'Distance Fare': distanceFare,
+            'Parking Charge': parkingCharge,
+            'GST': gst,
+          }
+        }
+      };
+      
+      console.log('💰 Airport fare calculated:', fareBreakdown);
+    } else {
+      // Regular rides use normal fare calculation
+      fareBreakdown = calculateFare(
+        pricing,
+        distanceData.distance,
+        `${scheduledDate} ${scheduledTime}`
+      );
+    }
 
     // ===== STAGE 4: CREATE BOOKING WITH ALL VALIDATED DATA =====
     const booking = await Booking.create({
@@ -184,10 +215,11 @@ export const createBooking = async (req, res) => {
         name: req.user.name,
         phone: req.user.phone,
       },
+      // Payment structure differs for airport rides
       status: 'pending',
-      paymentStatus: 'pending', // No payment at booking for regular rides
-      paidAmount: 0, // Regular rides don't charge upfront
-      paymentSchedule: 'full_on_completion', // Payment after ride completion
+      paymentStatus: rideType === 'airport' ? 'partial' : 'pending',
+      paidAmount: rideType === 'airport' ? Math.round(fareBreakdown.totalFare * 0.2) : 0,
+      paymentSchedule: rideType === 'airport' ? 'split_20_80' : 'full_on_completion',
     });
 
     // ===== LOGGING: FINAL BOOKING DATA =====

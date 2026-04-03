@@ -37,6 +37,7 @@ import pricingRoutes from './routes/pricingRoutes.js';
 import locationRoutes from './routes/locationRoutes.js';
 import feedbackRoutes from './routes/feedbackRoutes.js';
 import offerRoutes from './routes/offerRoutes.js';
+import partnerRoutes from './routes/partnerRoutes.js';
 
 // Get __dirname equivalent in ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -156,6 +157,7 @@ app.use('/api/pricing', pricingRoutes);
 app.use('/api/location', locationRoutes);
 app.use('/api/feedback', feedbackRoutes);
 app.use('/api/offers', offerRoutes);
+app.use('/api/partners', partnerRoutes);
 
 // Welcome route
 app.get('/', (req, res) => {

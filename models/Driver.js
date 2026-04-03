@@ -49,7 +49,7 @@ const driverSchema = new mongoose.Schema(
       },
       vehicleType: {
         type: String,
-        enum: ['sedan', 'suv', 'hatchback', 'luxury'],
+        enum: ['economy', 'premium'],
         required: true,
       },
       vehicleColor: String,

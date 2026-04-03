@@ -31,8 +31,8 @@ const tourBookingSchema = new mongoose.Schema(
     },
     carType: {
       type: String,
-      enum: ['mini', 'sedan', 'suv'],
-      default: 'sedan',
+      enum: ['economy', 'premium'],
+      default: 'premium',
     },
     passengers: {
       type: Number,

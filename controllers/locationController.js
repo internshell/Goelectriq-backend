@@ -417,3 +417,147 @@ export const googlePlacesDetails = async (req, res) => {
     error: lastError?.code,
   });
 };
+
+/**
+ * Get Airport Location
+ * GET /api/location/airport
+ * Returns Jaipur International Airport details
+ */
+export const getAirportLocation = async (req, res) => {
+  try {
+    const airportData = {
+      name: 'Jaipur International Airport',
+      address: 'Sanganer, Jaipur, Rajasthan 302011',
+      lat: 25.1899,
+      lng: 75.1768,
+      code: 'JAI',
+      city: 'Jaipur',
+    };
+
+    return res.json({
+      success: true,
+      data: airportData,
+    });
+  } catch (error) {
+    console.error('❌ Error fetching airport location:', error.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch airport location',
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * Get Location Suggestions
+ * GET /api/location/suggestions?query=...
+ * Returns location suggestions based on search query
+ * Uses Google Places Autocomplete API
+ */
+export const getLocationSuggestions = async (req, res) => {
+  try {
+    const { query } = req.query;
+
+    if (!query || query.trim().length < 2) {
+      return res.json({
+        success: true,
+        data: [],
+      });
+    }
+
+    // Use Google Places Autocomplete to get suggestions
+    try {
+      const apiKey = process.env.GOOGLE_SERVER_KEY;
+      if (!apiKey) {
+        return res.status(500).json({
+          success: false,
+          message: 'Google Maps API key not configured',
+        });
+      }
+
+      const params = {
+        input: query.trim(),
+        key: apiKey,
+        components: 'country:in',
+        location: '26.9124,75.7873', // Jaipur center
+        radius: '100000', // 100km radius
+        language: 'en',
+      };
+
+      const response = await axios.get(
+        'https://maps.googleapis.com/maps/api/place/autocomplete/json',
+        {
+          params: params,
+          timeout: 8000,
+        }
+      );
+
+      if (response.data.status === 'OK' && response.data.predictions) {
+        // Transform Google Places predictions to location format
+        const suggestions = response.data.predictions.map((prediction) => ({
+          name: prediction.main_text,
+          address: prediction.description,
+          placeId: prediction.place_id,
+        }));
+
+        // For each suggestion, try to get coordinates using Place Details API
+        const suggestionsWithCoords = await Promise.all(
+          suggestions.map(async (suggestion) => {
+            try {
+              const detailsParams = {
+                place_id: suggestion.placeId,
+                key: apiKey,
+                fields: 'geometry,formatted_address',
+              };
+
+              const detailsResponse = await axios.get(
+                'https://maps.googleapis.com/maps/api/place/details/json',
+                {
+                  params: detailsParams,
+                  timeout: 5000,
+                }
+              );
+
+              if (detailsResponse.data.status === 'OK' && detailsResponse.data.result?.geometry) {
+                const location = detailsResponse.data.result.geometry.location;
+                return {
+                  ...suggestion,
+                  lat: location.lat,
+                  lng: location.lng,
+                  address: detailsResponse.data.result.formatted_address || suggestion.address,
+                };
+              }
+              return suggestion;
+            } catch (err) {
+              console.warn(`Failed to get coordinates for ${suggestion.name}:`, err.message);
+              return suggestion;
+            }
+          })
+        );
+
+        return res.json({
+          success: true,
+          data: suggestionsWithCoords,
+        });
+      } else {
+        return res.json({
+          success: true,
+          data: [],
+        });
+      }
+    } catch (apiError) {
+      console.error('Google Places API error:', apiError.message);
+      // Return empty suggestions instead of failing
+      return res.json({
+        success: true,
+        data: [],
+      });
+    }
+  } catch (error) {
+    console.error('❌ Error fetching location suggestions:', error.message);
+    return res.json({
+      success: true,
+      data: [],
+    });
+  }
+};

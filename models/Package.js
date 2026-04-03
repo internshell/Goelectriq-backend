@@ -64,10 +64,8 @@ const packageSchema = new mongoose.Schema(
       },
     ],
     pricing: {
-      sedan: Number,
-      suv: Number,
-      hatchback: Number,
-      luxury: Number,
+      economy: Number,
+      premium: Number,
     },
     inclusions: {
       type: [String],

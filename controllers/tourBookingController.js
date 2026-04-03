@@ -22,23 +22,22 @@ export const createTourBooking = async (req, res) => {
     }
 
     // Get car-specific pricing from package
-    // Map car types to pricing fields in Package: mini→hatchback, sedan→sedan, suv→suv
-    const selectedCarType = carType || 'sedan';
+    // Map car types to pricing fields in Package: economy→economy, premium→premium
+    const selectedCarType = carType || 'premium';
     const pricingFieldMap = {
-      mini: 'hatchback',
-      sedan: 'sedan',
-      suv: 'suv'
+      economy: 'economy',
+      premium: 'premium'
     };
-    const pricingField = pricingFieldMap[selectedCarType] || 'sedan';
+    const pricingField = pricingFieldMap[selectedCarType] || 'premium';
     
     let packagePrice = 0;
     
     // First try to get car-specific price from pricing object
     if (pkg.pricing && pkg.pricing[pricingField]) {
       packagePrice = pkg.pricing[pricingField];
-    } else if (pkg.pricing?.sedan || pkg.pricing?.hatchback || pkg.pricing?.suv) {
-      // Fallback to sedan if selected type not available
-      packagePrice = pkg.pricing.sedan || pkg.pricing.hatchback || pkg.pricing.suv || pkg.basePrice || 0;
+    } else if (pkg.pricing?.economy || pkg.pricing?.premium) {
+      // Fallback to premium if selected type not available
+      packagePrice = pkg.pricing.premium || pkg.pricing.economy || pkg.basePrice || 0;
     } else {
       // Final fallback to basePrice
       packagePrice = pkg.basePrice || 0;

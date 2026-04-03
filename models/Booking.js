@@ -57,7 +57,7 @@ const bookingSchema = new mongoose.Schema(
     },
     cabType: {
       type: String,
-      enum: ['mini', 'sedan', 'suv', 'hatchback', 'luxury'],
+      enum: ['economy', 'premium'],
       required: true,
     },
     rideType: {

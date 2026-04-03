@@ -4,27 +4,18 @@ import Pricing from '../models/Pricing.js';
 const router = express.Router();
 
 const defaultPricingByCabType = {
-  mini: {
-    cabType: 'mini',
-    displayName: 'Mini Car',
+  economy: {
+    cabType: 'economy',
+    displayName: 'Economy',
     baseFare: 50,
     perKmRate: 10,
     minimumFare: 100,
     gstPercentage: 5,
     isActive: true,
   },
-  sedan: {
-    cabType: 'sedan',
-    displayName: 'Sedan',
-    baseFare: 75,
-    perKmRate: 14,
-    minimumFare: 150,
-    gstPercentage: 5,
-    isActive: true,
-  },
-  suv: {
-    cabType: 'suv',
-    displayName: 'SUV',
+  premium: {
+    cabType: 'premium',
+    displayName: 'Premium',
     baseFare: 100,
     perKmRate: 18,
     minimumFare: 200,
@@ -106,11 +97,15 @@ router.get('/:cabType', async (req, res) => {
 /**
  * GET /rates
  * Get all rates formatted for frontend app (mobile/web client)
- * Returns: { id, name, baseRate, maxPassengers, description }
+ * Returns: { id, name, baseRate, maxPassengers, description, fixedCharge, parkingCharge }
  */
 router.get('/app/rates', async (req, res) => {
   try {
-    const pricing = await Pricing.find({ isActive: true }).sort({ cabType: 1 });
+    // Only fetch Premium and Economy for airport rides
+    const pricing = await Pricing.find({ 
+      isActive: true,
+      cabType: { $in: ['premium', 'economy'] }
+    }).sort({ cabType: 1 });
 
     let rates;
     if (pricing.length > 0) {
@@ -120,13 +115,14 @@ router.get('/app/rates', async (req, res) => {
         baseRate: p.perKmRate,
         maxPassengers: p.capacity?.passengers || 4,
         description: `₹${p.perKmRate}/km`,
+        fixedCharge: p.fixedCharge || 0,
+        parkingCharge: p.parkingCharge || 0,
       }));
     } else {
       // Use defaults
       rates = [
-        { id: 'mini', name: 'Mini Car', baseRate: 10, maxPassengers: 4, description: 'Compact and economical' },
-        { id: 'sedan', name: 'Sedan', baseRate: 14, maxPassengers: 4, description: 'Comfortable and spacious' },
-        { id: 'suv', name: 'SUV', baseRate: 18, maxPassengers: 6, description: 'Premium and luxurious' },
+        { id: 'economy', name: 'Economy', baseRate: 10, maxPassengers: 4, description: 'Compact and economical', fixedCharge: 0, parkingCharge: 0 },
+        { id: 'premium', name: 'Premium', baseRate: 18, maxPassengers: 6, description: 'Premium and luxurious', fixedCharge: 0, parkingCharge: 0 },
       ];
     }
 
@@ -193,6 +189,67 @@ router.post('/app/rates', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error updating rates',
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * PATCH /admin/pricing/airport/:cabType
+ * Update airport ride charges (fixed charge & parking charge) for a specific car type
+ */
+router.patch('/admin/pricing/airport/:cabType', async (req, res) => {
+  try {
+    const { cabType } = req.params;
+    const { fixedCharge, parkingCharge } = req.body;
+
+    // Validate input
+    if (fixedCharge === undefined || parkingCharge === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: 'Fixed charge and parking charge are required',
+      });
+    }
+
+    if (fixedCharge < 0 || parkingCharge < 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Charges cannot be negative',
+      });
+    }
+
+    // Update in database
+    const updated = await Pricing.findOneAndUpdate(
+      { cabType: cabType.toLowerCase() },
+      {
+        fixedCharge: parseFloat(fixedCharge),
+        parkingCharge: parseFloat(parkingCharge),
+        updatedAt: new Date(),
+      },
+      { new: true }
+    );
+
+    if (!updated) {
+      return res.status(404).json({
+        success: false,
+        message: 'Pricing not found for this car type',
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Airport charges updated successfully',
+      data: {
+        id: updated.cabType,
+        name: updated.displayName,
+        fixedCharge: updated.fixedCharge,
+        parkingCharge: updated.parkingCharge,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error updating airport charges',
       error: error.message,
     });
   }
