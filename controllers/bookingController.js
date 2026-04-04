@@ -215,11 +215,12 @@ export const createBooking = async (req, res) => {
         name: req.user.name,
         phone: req.user.phone,
       },
-      // Payment structure differs for airport rides
+      // 20% advance payment required on all rides
       status: 'pending',
-      paymentStatus: rideType === 'airport' ? 'partial' : 'pending',
-      paidAmount: rideType === 'airport' ? Math.round(fareBreakdown.totalFare * 0.2) : 0,
-      paymentSchedule: rideType === 'airport' ? 'split_20_80' : 'full_on_completion',
+      paymentStatus: 'pending', // Will become 'partial' after 20% advance payment
+      paidAmount: 0, // Will be updated after payment
+      paymentSchedule: 'advance_20_on_booking', // 20% advance payment on booking
+      paymentMethod: 'online',
     });
 
     // ===== LOGGING: FINAL BOOKING DATA =====

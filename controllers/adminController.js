@@ -2,6 +2,7 @@ import Booking from '../models/Booking.js';
 import TourBooking from '../models/TourBooking.js';
 import User from '../models/User.js';
 import Driver from '../models/Driver.js';
+import CabPartner from '../models/CabPartner.js';
 import Package from '../models/Package.js';
 import Feedback from '../models/Feedback.js';
 import Payment from '../models/Payment.js';
@@ -873,19 +874,19 @@ export const bulkUpdateAdminPricingRates = async (req, res) => {
   }
 };
 
-/**
- * @desc    Update airport ride charges (fixed charge & parking charge)
- * @route   PATCH /api/admin/pricing/airport/:cabType
- * @access  Private/Admin
- */
 export const updateAirportRidePricing = async (req, res) => {
   try {
     const { cabType } = req.params;
-    const { fixedCharge, parkingCharge } = req.body;
+    const { rideType, fixedCharge, parkingCharge } = req.body;
 
     // Validate car type
     if (!['economy', 'premium'].includes(cabType)) {
       return res.status(400).json({ success: false, message: 'Invalid car type' });
+    }
+
+    // Validate ride type (pickup or drop)
+    if (!rideType || !['pickup', 'drop'].includes(rideType)) {
+      return res.status(400).json({ success: false, message: 'Invalid ride type. Must be "pickup" or "drop"' });
     }
 
     // Validate input
@@ -913,15 +914,21 @@ export const updateAirportRidePricing = async (req, res) => {
       });
     }
 
+    // Ensure default pricing exists for this cab type
+    await ensureDefaultPricingExists();
+
+    // Build update object based on ride type
+    const updateObject = {
+      [`airportCharges.${rideType}.fixedCharge`]: parsedFixed,
+      [`airportCharges.${rideType}.parkingCharge`]: parsedParking,
+      updatedAt: new Date(),
+    };
+
     // Update in database
     const updated = await Pricing.findOneAndUpdate(
       { cabType },
-      {
-        fixedCharge: parsedFixed,
-        parkingCharge: parsedParking,
-        updatedAt: new Date(),
-      },
-      { new: true, runValidators: true }
+      updateObject,
+      { returnDocument: 'after', runValidators: true }
     );
 
     if (!updated) {
@@ -933,12 +940,13 @@ export const updateAirportRidePricing = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: 'Airport charges updated successfully',
+      message: `Airport ${rideType} charges updated successfully`,
       data: {
         id: updated.cabType,
         name: updated.displayName,
-        fixedCharge: updated.fixedCharge,
-        parkingCharge: updated.parkingCharge,
+        rideType: rideType,
+        fixedCharge: updated.airportCharges[rideType].fixedCharge,
+        parkingCharge: updated.airportCharges[rideType].parkingCharge,
       },
     });
   } catch (error) {
@@ -1152,5 +1160,315 @@ export const completeRideBooking = async (req, res) => {
   } catch (error) {
     console.error('❌ Error in completeRideBooking:', error);
     res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * @desc    Admin collect remaining 80% payment after ride completion
+ * @route   POST /api/admin/bookings/:id/collect-payment
+ * @access  Private (Admin only)
+ * 
+ * Called when admin receives payment (cash/online) for remaining balance
+ */
+export const collectRemainingPayment = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { paymentMethod = 'cash', notes = '', paidAmount } = req.body;
+    const adminId = req.user.id;
+
+    const booking = await Booking.findById(id)
+      .populate('user')
+      .populate('pricing');
+
+    if (!booking) {
+      return res.status(404).json({ success: false, message: 'Booking not found' });
+    }
+
+    const totalFare = booking.pricing?.totalFare || 0;
+    const alreadyPaid = booking.paidAmount || 0;
+    const remainingAmount = totalFare - alreadyPaid;
+
+    if (remainingAmount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Full payment already received for this booking'
+      });
+    }
+
+    // Accept the payment amount provided
+    const collectAmount = paidAmount ? Math.min(paidAmount, remainingAmount) : remainingAmount;
+
+    // Update booking with payment info
+    booking.paidAmount = alreadyPaid + collectAmount;
+    booking.paymentMethod = paymentMethod;
+    
+    // Mark as paid if full amount is collected
+    if (booking.paidAmount >= totalFare) {
+      booking.paymentStatus = 'paid';
+      booking.status = 'completed';
+      console.log('✅ PAYMENT COMPLETE - Booking fully paid');
+    } else {
+      booking.paymentStatus = 'partial';
+      console.log('💳 PARTIAL PAYMENT - Still awaiting balance');
+    }
+
+    // Store payment collection details
+    booking.paymentDetails = {
+      ...booking.paymentDetails,
+      lastPaymentAt: new Date(),
+      lastPaymentMethod: paymentMethod,
+      lastPaymentAmount: collectAmount,
+      collectedBy: adminId,
+      collectionNotes: notes,
+    };
+
+    await booking.save();
+
+    // Create payment record
+    const payment = new Payment({
+      booking: booking._id,
+      user: booking.user._id,
+      amount: collectAmount,
+      currency: 'INR',
+      paymentMethod: paymentMethod,
+      paymentType: 'ride_booking',
+      status: 'success',
+      transactionId: `MANUAL_${booking.bookingId}_${Date.now()}`,
+      paidAt: new Date(),
+      paymentDetails: {
+        method: paymentMethod,
+        notes: notes,
+        collectedBy: adminId,
+      }
+    });
+
+    await payment.save();
+
+    console.log('✅ Payment collected successfully:', {
+      bookingId: booking.bookingId,
+      collectedAmount: collectAmount,
+      totalPaid: booking.paidAmount,
+      totalFare: totalFare,
+      paymentMethod: paymentMethod,
+      status: booking.paymentStatus,
+    });
+
+    res.status(200).json({
+      success: true,
+      message: `Payment of ₹${collectAmount} collected successfully`,
+      data: {
+        bookingId: booking.bookingId,
+        totalFare: totalFare,
+        paidAmount: booking.paidAmount,
+        remainingAmount: totalFare - booking.paidAmount,
+        paymentStatus: booking.paymentStatus,
+        status: booking.status,
+        paymentMethod: paymentMethod,
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error collecting payment:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * @desc    Get pending payments (rides with incomplete payment)
+ * @route   GET /api/admin/pending-payments
+ * @access  Private (Admin only)
+ */
+export const getPendingPayments = async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const skip = (page - 1) * limit;
+
+    const pendingPayments = await Booking.find({
+      paymentStatus: { $in: ['pending', 'partial'] }
+    })
+      .populate('user', 'name email phone')
+      .populate('driver', 'name phone')
+      .populate('pricing')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    const totalCount = await Booking.countDocuments({
+      paymentStatus: { $in: ['pending', 'partial'] }
+    });
+
+    // Calculate payment details for each booking
+    const paymentsSummary = pendingPayments.map(booking => {
+      // Calculate fare same way as ride page: distance × perKmRate (no GST, no extra charges)
+      const perKmRate = booking.pricing?.perKmRate || 0;
+      const distance = booking.distance || 0;
+      const calculatedFare = distance * perKmRate;
+      
+      const paidAmount = booking.paidAmount || 0;
+      const remainingAmount = calculatedFare - paidAmount;
+      const advanceAmount = Math.round(calculatedFare * 0.2);
+      
+      return {
+        _id: booking._id,
+        bookingId: booking.bookingId,
+        user: booking.user,
+        rideType: booking.rideType,
+        cabType: booking.cabType || booking.carType || 'Standard',
+        perKmRate: perKmRate,
+        pickupLocation: booking.pickupLocation,
+        dropLocation: booking.dropLocation,
+        distance: distance,
+        totalFare: calculatedFare,  // Same as ride page: distance × perKmRate
+        advanceAmount: advanceAmount,
+        paidAmount: paidAmount,
+        remainingAmount: remainingAmount,
+        paymentStatus: booking.paymentStatus,
+        status: booking.status,
+        scheduledDate: booking.scheduledDate,
+        scheduledTime: booking.scheduledTime,
+        createdAt: booking.createdAt,
+      };
+    });
+
+    res.status(200).json({
+      success: true,
+      data: paymentsSummary,
+      pagination: {
+        currentPage: page,
+        totalPages: Math.ceil(totalCount / limit),
+        totalCount: totalCount,
+        limit: limit,
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error getting pending payments:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * @desc    Get all cab partners (Admin)
+ * @route   GET /api/admin/cab-partners
+ * @access  Private (Admin only)
+ */
+export const getAdminCabPartners = async (req, res) => {
+  try {
+    const { status, page = 1, limit = 10 } = req.query;
+    const query = {};
+
+    if (status) query.status = status;
+
+    const cabPartners = await CabPartner.find(query)
+      .limit(limit * 1)
+      .skip((page - 1) * limit)
+      .sort({ createdAt: -1 });
+
+    const total = await CabPartner.countDocuments(query);
+    const totalPages = Math.ceil(total / limit);
+
+    res.status(200).json({
+      success: true,
+      partners: cabPartners,
+      totalPages,
+      currentPage: parseInt(page),
+      total,
+    });
+  } catch (error) {
+    console.error('❌ Error fetching cab partners:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching cab partners',
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * @desc    Update cab partner status
+ * @route   PUT /api/admin/cab-partners/:id
+ * @access  Private (Admin only)
+ */
+export const updateAdminCabPartner = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, comments } = req.body;
+
+    if (!status) {
+      return res.status(400).json({
+        success: false,
+        message: 'Status is required',
+      });
+    }
+
+    const validStatuses = ['pending', 'approved', 'rejected', 'active', 'inactive'];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid status. Must be one of: ${validStatuses.join(', ')}`,
+      });
+    }
+
+    const cabPartner = await CabPartner.findByIdAndUpdate(
+      id,
+      {
+        status,
+        ...(comments && { 'verificationDetails.comments': comments }),
+        ...(status === 'approved' && { 'verificationDetails.verificationDate': new Date() }),
+      },
+      { new: true }
+    );
+
+    if (!cabPartner) {
+      return res.status(404).json({
+        success: false,
+        message: 'Cab partner not found',
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Cab partner updated successfully',
+      data: cabPartner,
+    });
+  } catch (error) {
+    console.error('❌ Error updating cab partner:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error updating cab partner',
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * @desc    Delete cab partner
+ * @route   DELETE /api/admin/cab-partners/:id
+ * @access  Private (Admin only)
+ */
+export const deleteAdminCabPartner = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const cabPartner = await CabPartner.findByIdAndDelete(id);
+
+    if (!cabPartner) {
+      return res.status(404).json({
+        success: false,
+        message: 'Cab partner not found',
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Cab partner deleted successfully',
+      data: cabPartner,
+    });
+  } catch (error) {
+    console.error('❌ Error deleting cab partner:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error deleting cab partner',
+      error: error.message,
+    });
   }
 };

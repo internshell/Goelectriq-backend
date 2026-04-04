@@ -97,7 +97,7 @@ router.get('/:cabType', async (req, res) => {
 /**
  * GET /rates
  * Get all rates formatted for frontend app (mobile/web client)
- * Returns: { id, name, baseRate, maxPassengers, description, fixedCharge, parkingCharge }
+ * Returns: { id, name, baseRate, maxPassengers, description, fixedCharge, parkingCharge, airportCharges }
  */
 router.get('/app/rates', async (req, res) => {
   try {
@@ -115,14 +115,50 @@ router.get('/app/rates', async (req, res) => {
         baseRate: p.perKmRate,
         maxPassengers: p.capacity?.passengers || 4,
         description: `₹${p.perKmRate}/km`,
+        // Legacy fields for backward compatibility
         fixedCharge: p.fixedCharge || 0,
         parkingCharge: p.parkingCharge || 0,
+        // New airportCharges structure for pickup/drop
+        airportCharges: {
+          pickup: {
+            fixedCharge: p.airportCharges?.pickup?.fixedCharge || 0,
+            parkingCharge: p.airportCharges?.pickup?.parkingCharge || 0,
+          },
+          drop: {
+            fixedCharge: p.airportCharges?.drop?.fixedCharge || 0,
+            parkingCharge: p.airportCharges?.drop?.parkingCharge || 0,
+          },
+        },
       }));
     } else {
       // Use defaults
       rates = [
-        { id: 'economy', name: 'Economy', baseRate: 10, maxPassengers: 4, description: 'Compact and economical', fixedCharge: 0, parkingCharge: 0 },
-        { id: 'premium', name: 'Premium', baseRate: 18, maxPassengers: 6, description: 'Premium and luxurious', fixedCharge: 0, parkingCharge: 0 },
+        { 
+          id: 'economy', 
+          name: 'Economy', 
+          baseRate: 10, 
+          maxPassengers: 4, 
+          description: 'Compact and economical', 
+          fixedCharge: 0, 
+          parkingCharge: 0,
+          airportCharges: {
+            pickup: { fixedCharge: 0, parkingCharge: 0 },
+            drop: { fixedCharge: 0, parkingCharge: 0 },
+          },
+        },
+        { 
+          id: 'premium', 
+          name: 'Premium', 
+          baseRate: 18, 
+          maxPassengers: 6, 
+          description: 'Premium and luxurious', 
+          fixedCharge: 0, 
+          parkingCharge: 0,
+          airportCharges: {
+            pickup: { fixedCharge: 0, parkingCharge: 0 },
+            drop: { fixedCharge: 0, parkingCharge: 0 },
+          },
+        },
       ];
     }
 
@@ -201,7 +237,7 @@ router.post('/app/rates', async (req, res) => {
 router.patch('/admin/pricing/airport/:cabType', async (req, res) => {
   try {
     const { cabType } = req.params;
-    const { fixedCharge, parkingCharge } = req.body;
+    const { fixedCharge, parkingCharge, rideType = 'pickup' } = req.body;
 
     // Validate input
     if (fixedCharge === undefined || parkingCharge === undefined) {
@@ -218,14 +254,28 @@ router.patch('/admin/pricing/airport/:cabType', async (req, res) => {
       });
     }
 
+    if (!['pickup', 'drop'].includes(rideType)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid ride type. Must be "pickup" or "drop"',
+      });
+    }
+
+    // Build update object with correct nested path
+    const updatePath = `airportCharges.${rideType}`;
+    const updateData = {
+      [updatePath]: {
+        fixedCharge: parseFloat(fixedCharge),
+        parkingCharge: parseFloat(parkingCharge),
+      },
+    };
+
+    console.log(`💾 Updating ${rideType} airport charges for ${cabType}:`, updateData);
+
     // Update in database
     const updated = await Pricing.findOneAndUpdate(
       { cabType: cabType.toLowerCase() },
-      {
-        fixedCharge: parseFloat(fixedCharge),
-        parkingCharge: parseFloat(parkingCharge),
-        updatedAt: new Date(),
-      },
+      updateData,
       { new: true }
     );
 
@@ -236,14 +286,17 @@ router.patch('/admin/pricing/airport/:cabType', async (req, res) => {
       });
     }
 
+    const chargeData = updated.airportCharges[rideType];
+    
     res.json({
       success: true,
-      message: 'Airport charges updated successfully',
+      message: `Airport ${rideType} charges updated successfully`,
       data: {
         id: updated.cabType,
         name: updated.displayName,
-        fixedCharge: updated.fixedCharge,
-        parkingCharge: updated.parkingCharge,
+        rideType: rideType,
+        fixedCharge: chargeData.fixedCharge,
+        parkingCharge: chargeData.parkingCharge,
       },
     });
   } catch (error) {

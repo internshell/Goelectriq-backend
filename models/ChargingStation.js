@@ -39,17 +39,8 @@ const chargingStationSchema = new mongoose.Schema(
       city: String,
       state: String,
       pincode: String,
-      coordinates: {
-        type: {
-          type: String,
-          enum: ['Point'],
-          default: 'Point',
-        },
-        coordinates: {
-          type: [Number], // [longitude, latitude]
-          required: true,
-        },
-      },
+      latitude: Number,
+      longitude: Number,
     },
     chargingDetails: {
       numberOfPoints: {
@@ -140,7 +131,8 @@ const chargingStationSchema = new mongoose.Schema(
 );
 
 // Geospatial index for location-based search
-chargingStationSchema.index({ 'location.coordinates': '2dsphere' });
+// TODO: Enable this when coordinates are provided from frontend
+// chargingStationSchema.index({ 'location.coordinates': '2dsphere' });
 
 // Other indexes
 chargingStationSchema.index({ phone: 1 });

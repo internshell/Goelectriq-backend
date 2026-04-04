@@ -210,8 +210,18 @@ export const registerChargingStation = async (req, res) => {
       pricePerUnit,
     } = req.body;
 
+    console.log('📝 Charging Station Registration Request:');
+    console.log('  Station:', stationName);
+    console.log('  Owner:', ownerName);
+    console.log('  Phone:', phone);
+    console.log('  Location:', location);
+    console.log('  Charge Points:', chargePoints);
+    console.log('  Price/Unit:', pricePerUnit);
+    console.log('  File:', req.file ? req.file.originalname : 'No file');
+
     // Validation
     if (!stationName || !ownerName || !phone || !location || !chargePoints || !pricePerUnit) {
+      console.log('❌ Validation failed: Missing required fields');
       return res.status(400).json({
         success: false,
         message: 'All fields are required',
@@ -221,6 +231,7 @@ export const registerChargingStation = async (req, res) => {
     // Validate phone
     const phoneRegex = /^[6-9]\d{9}$/;
     if (!phoneRegex.test(phone)) {
+      console.log('❌ Validation failed: Invalid phone format');
       return res.status(400).json({
         success: false,
         message: 'Please provide a valid 10-digit phone number',
@@ -229,6 +240,7 @@ export const registerChargingStation = async (req, res) => {
 
     // Validate chargePoints
     if (isNaN(chargePoints) || chargePoints <= 0) {
+      console.log('❌ Validation failed: Invalid chargePoints:', chargePoints);
       return res.status(400).json({
         success: false,
         message: 'Number of charging points must be greater than 0',
@@ -237,6 +249,7 @@ export const registerChargingStation = async (req, res) => {
 
     // Validate price
     if (isNaN(pricePerUnit) || pricePerUnit <= 0) {
+      console.log('❌ Validation failed: Invalid pricePerUnit:', pricePerUnit);
       return res.status(400).json({
         success: false,
         message: 'Price per unit must be greater than 0',
@@ -246,6 +259,7 @@ export const registerChargingStation = async (req, res) => {
     // Check if station already exists
     const existingStation = await ChargingStation.findOne({ phone });
     if (existingStation) {
+      console.log('❌ Validation failed: Phone already exists:', phone);
       return res.status(400).json({
         success: false,
         message: 'A charging station with this phone number already exists',
@@ -268,6 +282,7 @@ export const registerChargingStation = async (req, res) => {
       phone,
       location: {
         address: location,
+        city: location.split(',')[0].trim() || location, // Extract first part as city, or use full location
       },
       chargingDetails: {
         numberOfPoints: parseInt(chargePoints),
@@ -276,7 +291,7 @@ export const registerChargingStation = async (req, res) => {
       documents: {
         businessDocument: businessDocPath,
       },
-      status: 'pending',
+      status: process.env.NODE_ENV === 'development' ? 'approved' : 'pending',
     };
 
     const newStation = await ChargingStation.create(stationData);
@@ -348,6 +363,41 @@ export const getAllChargingStations = async (req, res) => {
     const query = {};
 
     if (status) query.status = status;
+
+    const stations = await ChargingStation.find(query)
+      .limit(limit * 1)
+      .skip((page - 1) * limit)
+      .sort({ createdAt: -1 });
+
+    const total = await ChargingStation.countDocuments(query);
+
+    res.status(200).json({
+      success: true,
+      data: stations,
+      pagination: {
+        total,
+        pages: Math.ceil(total / limit),
+        currentPage: page,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching charging stations',
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * @desc    Get approved charging stations (Public)
+ * @route   GET /api/partners/charging-stations
+ * @access  Public
+ */
+export const getApprovedChargingStations = async (req, res) => {
+  try {
+    const { page = 1, limit = 10 } = req.query;
+    const query = { status: 'approved' };
 
     const stations = await ChargingStation.find(query)
       .limit(limit * 1)

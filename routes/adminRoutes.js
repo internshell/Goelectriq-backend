@@ -36,6 +36,11 @@ import {
   approveRideBooking,
   rejectRideBooking,
   completeRideBooking,
+  collectRemainingPayment,
+  getPendingPayments,
+  getAdminCabPartners,
+  updateAdminCabPartner,
+  deleteAdminCabPartner,
 } from '../controllers/adminController.js';
 
 const router = express.Router();
@@ -68,6 +73,10 @@ router.patch('/ride-bookings/:id/approve', approveRideBooking);
 router.patch('/ride-bookings/:id/reject', rejectRideBooking);
 router.patch('/ride-bookings/:id/complete', completeRideBooking);
 
+// ============ PAYMENT COLLECTION (80% Collection from Driver/Office) ============
+router.get('/pending-payments', getPendingPayments);
+router.post('/bookings/:id/collect-payment', collectRemainingPayment);
+
 // ============ TOUR BOOKINGS MANAGEMENT ============
 router.get('/tour-bookings', getAdminTourBookings);
 router.get('/tour-bookings/:tourBookingId/payments', getTourBookingPayments);
@@ -97,5 +106,10 @@ router.get('/pricing/rates', getAdminPricingRates);
 router.patch('/pricing/rates/:rateId', updateAdminPricingRate);
 router.post('/pricing/rates/bulk', bulkUpdateAdminPricingRates);
 router.patch('/pricing/airport/:cabType', updateAirportRidePricing);
+
+// ============ CAB PARTNER MANAGEMENT ============
+router.get('/cab-partners', getAdminCabPartners);
+router.put('/cab-partners/:id', updateAdminCabPartner);
+router.delete('/cab-partners/:id', deleteAdminCabPartner);
 
 export default router;

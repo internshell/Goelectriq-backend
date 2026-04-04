@@ -369,6 +369,7 @@ export const verifyRidePayment = async (req, res) => {
       if (booking) {
         // Check if this is a remaining payment (partial payment that completes the total)
         const totalFare = booking.pricing?.totalFare || 0;
+        const advanceAmount = Math.round(totalFare * 0.2); // 20% advance
         const previousPayments = await Payment.find({
           booking: booking._id,
           status: 'success',
@@ -378,38 +379,41 @@ export const verifyRidePayment = async (req, res) => {
         const previousPaidAmount = previousPayments.reduce((sum, p) => sum + p.amount, 0);
         const totalPaidNow = previousPaidAmount + payment.amount;
         const isRemainingPaymentComplete = totalPaidNow >= totalFare;
+        const isAdvancePaymentComplete = totalPaidNow >= advanceAmount;
         
-        console.log('💰 Payment Analysis:', {
+        console.log('💰 Payment Analysis (20% Advance System):', {
           totalFare,
+          advanceAmount,
           previousPaidAmount,
           currentPayment: payment.amount,
           totalPaidNow,
+          isAdvancePaymentComplete,
           isRemainingPaymentComplete
         });
 
-        booking.paymentStatus = payment.status === 'success' ? 'paid' : 'failed';
+        booking.paymentStatus = payment.status === 'success' ? 'partial' : 'failed';
+        booking.paidAmount = totalPaidNow;
         
-        // IMPORTANT: Status flow:
-        // 1. Initial booking created = pending
-        // 2. First payment (initial deposit) = confirmed
-        // 3. Remaining payment completes total = completed
-        // 4. Stay confirmed until remaining payment is done
+        // IMPORTANT: Status flow for 20% advance system:
+        // 1. Initial booking created = pending (awaiting 20% advance payment)
+        // 2. 20% advance payment success = confirmed (ride can proceed)
+        // 3. Remaining payment = paid (all amount collected)
         
         if (payment.status === 'success') {
           if (isRemainingPaymentComplete) {
-            // All payments complete → Mark as COMPLETED
-            booking.status = 'completed';
+            // All payments complete → Mark as paid
+            booking.paymentStatus = 'paid';
+            booking.status = 'completed'; // Only update status if payment is done
             console.log('✅ Booking marked as COMPLETED - Full payment received (₹' + totalPaidNow + '/' + totalFare + ')');
-          } else {
-            // Partial payment (initial or intermediate) → Keep/Mark as CONFIRMED
-            // Only update to confirmed if not already completed
-            if (booking.status !== 'completed') {
-              booking.status = 'confirmed';
-              console.log('⏳ Booking marked as CONFIRMED - Waiting for remaining payment (₹' + totalPaidNow + '/' + totalFare + ')');
-            }
+          } else if (isAdvancePaymentComplete) {
+            // 20% advance payment received → Confirm booking for ride
+            booking.paymentStatus = 'partial';
+            booking.status = 'confirmed';
+            console.log('✅ Booking marked as CONFIRMED - 20% advance payment received (₹' + totalPaidNow + '/' + totalFare + ')');
           }
         } else {
           // Payment failed
+          booking.paymentStatus = 'failed';
           booking.status = 'pending';
           console.log('❌ Booking status reset to PENDING - Payment failed');
         }
@@ -441,7 +445,9 @@ export const verifyRidePayment = async (req, res) => {
           bookingId: booking._id, 
           status: booking.status,
           paymentStatus: booking.paymentStatus,
-          totalPaidAmount: totalPaidNow
+          paidAmount: booking.paidAmount,
+          totalFare: totalFare,
+          advanceAmount: advanceAmount
         });
       } else {
         console.error('❌ Booking not found for payment:', payment.booking);

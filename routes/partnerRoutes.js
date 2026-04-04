@@ -7,6 +7,7 @@ import {
   registerChargingStation,
   getAllCabPartners,
   getAllChargingStations,
+  getApprovedChargingStations,
   approveCabPartner,
   rejectCabPartner,
   approveChargingStation,
@@ -61,6 +62,13 @@ router.post('/cab/register', upload.fields([
  */
 router.post('/charging-station/register', upload.single('businessDocument'), registerChargingStation);
 
+/**
+ * @route   GET /api/partners/charging-stations
+ * @desc    Get all approved charging stations (public)
+ * @access  Public
+ */
+router.get('/charging-stations', getApprovedChargingStations);
+
 // =================== ADMIN ROUTES ===================
 
 // Protect all admin routes
@@ -75,11 +83,11 @@ router.use(isAdmin);
 router.get('/cab', getAllCabPartners);
 
 /**
- * @route   GET /api/partners/charging-stations
- * @desc    Get all charging stations
+ * @route   GET /api/partners/admin/charging-stations
+ * @desc    Get all charging stations (admin view)
  * @access  Private (Admin)
  */
-router.get('/charging-stations', getAllChargingStations);
+router.get('/admin/charging-stations', getAllChargingStations);
 
 /**
  * @route   PUT /api/partners/cab/:id/approve

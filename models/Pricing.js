@@ -91,7 +91,38 @@ const pricingSchema = new mongoose.Schema(
       type: Number,
       default: 5,
     },
-    // Airport ride pricing (fixed charges, not per km)
+    // Airport ride pricing (separate for pickup and drop)
+    airportCharges: {
+      pickup: {
+        fixedCharge: {
+          type: Number,
+          default: 0,
+          min: 0,
+          description: 'Fixed charge for airport pickup (not distance-based)',
+        },
+        parkingCharge: {
+          type: Number,
+          default: 0,
+          min: 0,
+          description: 'Parking fee for airport pickup',
+        },
+      },
+      drop: {
+        fixedCharge: {
+          type: Number,
+          default: 0,
+          min: 0,
+          description: 'Fixed charge for airport drop (not distance-based)',
+        },
+        parkingCharge: {
+          type: Number,
+          default: 0,
+          min: 0,
+          description: 'Parking fee for airport drop',
+        },
+      },
+    },
+    // Legacy fields for backward compatibility
     fixedCharge: {
       type: Number,
       default: 0,
