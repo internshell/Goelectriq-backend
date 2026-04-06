@@ -69,12 +69,8 @@ export const isNightTime = (date = new Date()) => {
       fare = pricing.minimumFare;
     }
     
-    // Calculate GST
-    const gstPercentage = pricing.gstPercentage || 5;
-    const gst = fare * (gstPercentage / 100);
-    
-    // Total fare
-    const totalFare = fare + gst;
+    // NO GST - Total fare is just the base fare without any tax
+    const totalFare = fare;
     
     return {
       baseFare: parseFloat(pricing.baseFare.toFixed(2)),
@@ -84,8 +80,8 @@ export const isNightTime = (date = new Date()) => {
       nightCharge: parseFloat(nightCharge.toFixed(2)),
       surgeCharge: parseFloat(surgeCharge.toFixed(2)),
       subtotal: parseFloat(fare.toFixed(2)),
-      gst: parseFloat(gst.toFixed(2)),
-      gstPercentage,
+      gst: 0, // NO GST
+      gstPercentage: 0, // NO GST
       totalFare: parseFloat(totalFare.toFixed(2)),
       discount: 0,
       isNightTime: isNight,

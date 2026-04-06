@@ -19,13 +19,13 @@ const getGoogleClient = () => new OAuth2Client(
  */
 export const registerUser = async (req, res) => {
   try {
-    const { name, email, phone, password } = req.body;
+    const { firstName, lastName, email, phone, password } = req.body;
 
     // Validate required fields
-    if (!name || !email || !phone || !password) {
+    if (!firstName || !lastName || !email || !phone || !password) {
       return res.status(400).json({
         success: false,
-        message: 'Please provide name, email, mobile number, and password',
+        message: 'Please provide firstName, lastName, email, mobile number, and password',
       });
     }
 
@@ -75,7 +75,8 @@ export const registerUser = async (req, res) => {
 
     // Create user
     const user = await User.create({
-      name: String(name).trim(),
+      firstName: String(firstName).trim(),
+      lastName: String(lastName).trim(),
       email: emailLower,
       phone: phoneClean,
       password: String(password),
@@ -94,7 +95,8 @@ export const registerUser = async (req, res) => {
       data: {
         user: {
           id: user._id,
-          name: user.name,
+          firstName: user.firstName,
+          lastName: user.lastName,
           email: user.email,
           phone: user.phone,
           role: user.role,
@@ -201,6 +203,8 @@ export const loginUser = async (req, res) => {
       data: {
         user: {
           id: user._id,
+          firstName: user.firstName,
+          lastName: user.lastName,
           name: user.name,
           email: user.email,
           phone: user.phone,
@@ -513,8 +517,14 @@ export const googleAuth = async (req, res) => {
         await user.save();
       }
     } else {
+      // Split name into firstName and lastName for Google login
+      const nameParts = (name || email.split('@')[0]).split(' ');
+      const firstName = nameParts[0] || 'User';
+      const lastName = nameParts.slice(1).join(' ') || '';
+
       user = await User.create({
-        name: name || email.split('@')[0],
+        firstName,
+        lastName,
         email,
         googleId,
         profileImage: picture || '',
@@ -538,6 +548,8 @@ export const googleAuth = async (req, res) => {
       data: {
         user: {
           id: user._id,
+          firstName: user.firstName,
+          lastName: user.lastName,
           name: user.name,
           email: user.email,
           phone: user.phone,

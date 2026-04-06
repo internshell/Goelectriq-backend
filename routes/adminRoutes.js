@@ -5,6 +5,7 @@ import { adminLimiter } from '../middleware/rateLimiter.js';
 import { uploadImageMemory } from '../config/multer.js';
 import { uploadPackageImage } from '../controllers/uploadController.js';
 import { changePassword } from '../controllers/userController.js';
+import { getAirportBookings } from '../controllers/bookingController.js';
 import {
   getAllBookings,
   getAnalytics,
@@ -69,6 +70,7 @@ router.patch('/bookings/:id/status', updateBookingStatusAdmin);
 
 // ============ RIDE BOOKINGS MANAGEMENT (NEW APPROVAL FLOW) ============
 router.get('/ride-bookings/pending', getPendingRideBookings);
+router.get('/airport-bookings', getAirportBookings);
 router.patch('/ride-bookings/:id/approve', approveRideBooking);
 router.patch('/ride-bookings/:id/reject', rejectRideBooking);
 router.patch('/ride-bookings/:id/complete', completeRideBooking);

@@ -12,18 +12,24 @@ export const getProfile = async (req, res) => {
 
 export const updateProfile = async (req, res) => {
   try {
-    const allowed = ['name', 'phone', 'address', 'profileImage'];
+    const allowed = ['firstName', 'lastName', 'phone', 'address', 'profileImage', 'dateOfBirth', 'gender'];
     const updates = {};
     Object.keys(req.body).forEach((key) => {
       if (allowed.includes(key)) updates[key] = req.body[key];
     });
+    console.log('📝 Profile update - Allowed fields:', allowed);
+    console.log('📝 Profile update - Updates to apply:', updates);
+    
     const user = await User.findByIdAndUpdate(
       req.user._id,
       updates,
       { new: true, runValidators: true }
     ).select('-password');
+    
+    console.log('✅ Profile updated successfully:', { firstName: user.firstName, lastName: user.lastName });
     res.status(200).json({ success: true, data: user });
   } catch (error) {
+    console.error('❌ Profile update error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };

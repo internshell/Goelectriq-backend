@@ -86,10 +86,15 @@ export const getAllBookings = async (req, res) => {
       const limit = parseInt(req.query.limit) || 20;
       const skip = (page - 1) * limit;
       
-      const query = {};
+      const query = {
+        // 🔑 IMPORTANT: Only show bookings where 20% advance payment is made
+        // Exclude bookings with paymentStatus='pending' (no payment made yet)
+        paymentStatus: { $ne: 'pending' }
+      };
       if (req.query.status && req.query.status !== 'all') query.status = req.query.status;
       
-      console.log('Admin Bookings Query:', query);
+      console.log('Admin Bookings Query (20% Advance Payment System):', query);
+      console.log('📌 Note: Admin panel shows only bookings with 20% advance payment made (paymentStatus != pending)');
       
       const bookings = await Booking.find(query)
         .populate('user', 'name email phone')
@@ -98,7 +103,7 @@ export const getAllBookings = async (req, res) => {
         .skip(skip)
         .limit(limit);
       
-      console.log('Bookings found:', bookings.length);
+      console.log('Bookings found (with payment):', bookings.length);
       
       const total = await Booking.countDocuments(query);
       
@@ -686,7 +691,7 @@ export const getAllPaymentsAdmin = async (req, res) => {
     console.log('Admin Payments Query:', query);
     
     const payments = await Payment.find(query)
-      .populate('user', 'name email phone')
+      .populate('user', 'firstName lastName email phone')
       .populate('booking', 'bookingId')
       .sort({ createdAt: -1 })
       .skip(skip)
@@ -1286,7 +1291,7 @@ export const getPendingPayments = async (req, res) => {
     const pendingPayments = await Booking.find({
       paymentStatus: { $in: ['pending', 'partial'] }
     })
-      .populate('user', 'name email phone')
+      .populate('user', 'firstName lastName email phone')
       .populate('driver', 'name phone')
       .populate('pricing')
       .sort({ createdAt: -1 })
@@ -1299,29 +1304,45 @@ export const getPendingPayments = async (req, res) => {
 
     // Calculate payment details for each booking
     const paymentsSummary = pendingPayments.map(booking => {
-      // Calculate fare same way as ride page: distance × perKmRate (no GST, no extra charges)
+      // Use totalFare from pricing object if available, otherwise calculate
+      const totalFare = booking.pricing?.totalFare || (booking.distance * (booking.pricing?.perKmRate || 0));
       const perKmRate = booking.pricing?.perKmRate || 0;
       const distance = booking.distance || 0;
-      const calculatedFare = distance * perKmRate;
       
       const paidAmount = booking.paidAmount || 0;
-      const remainingAmount = calculatedFare - paidAmount;
-      const advanceAmount = Math.round(calculatedFare * 0.2);
+      const remainingAmount = totalFare - paidAmount;
+      const advanceAmount = Math.round(totalFare * 0.2);
+      
+      // Construct full name from firstName and lastName
+      const fullName = booking.user 
+        ? `${booking.user.firstName || ''} ${booking.user.lastName || ''}`.trim() || 'Unknown User'
+        : 'Unknown User';
       
       return {
         _id: booking._id,
         bookingId: booking.bookingId,
-        user: booking.user,
+        user: {
+          _id: booking.user?._id,
+          firstName: booking.user?.firstName || '',
+          lastName: booking.user?.lastName || '',
+          name: fullName,
+          email: booking.user?.email || 'N/A',
+          phone: booking.user?.phone || 'N/A',
+        },
         rideType: booking.rideType,
         cabType: booking.cabType || booking.carType || 'Standard',
         perKmRate: perKmRate,
-        pickupLocation: booking.pickupLocation,
-        dropLocation: booking.dropLocation,
+        pickupLocation: typeof booking.pickupLocation === 'string' 
+          ? booking.pickupLocation 
+          : (booking.pickupLocation?.address || 'N/A'),
+        dropLocation: typeof booking.dropLocation === 'string'
+          ? booking.dropLocation
+          : (booking.dropLocation?.address || 'N/A'),
         distance: distance,
-        totalFare: calculatedFare,  // Same as ride page: distance × perKmRate
+        totalFare: parseFloat(totalFare) || 0,  // Ensure it's a number
         advanceAmount: advanceAmount,
-        paidAmount: paidAmount,
-        remainingAmount: remainingAmount,
+        paidAmount: parseFloat(paidAmount) || 0,
+        remainingAmount: parseFloat(remainingAmount) || 0,
         paymentStatus: booking.paymentStatus,
         status: booking.status,
         scheduledDate: booking.scheduledDate,

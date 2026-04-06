@@ -3,11 +3,17 @@ import bcrypt from 'bcryptjs';
 
 const userSchema = new mongoose.Schema(
   {
-    name: {
+    firstName: {
       type: String,
-      required: [true, 'Please provide your name'],
+      required: [true, 'Please provide your first name'],
       trim: true,
-      maxlength: [50, 'Name cannot be more than 50 characters'],
+      maxlength: [50, 'First name cannot be more than 50 characters'],
+    },
+    lastName: {
+      type: String,
+      required: [true, 'Please provide your last name'],
+      trim: true,
+      maxlength: [50, 'Last name cannot be more than 50 characters'],
     },
     email: {
       type: String,
@@ -22,7 +28,10 @@ const userSchema = new mongoose.Schema(
     },
     phone: {
       type: String,
-      required: [true, 'Please provide a mobile number'],
+      required: function() {
+        // Phone required only for non-Google users
+        return !this.googleId;
+      },
       unique: true,
       trim: true,
       sparse: true,
@@ -135,6 +144,11 @@ userSchema.methods.matchPassword = async function (enteredPassword) {
   if (!this.password) return false;
   return await bcrypt.compare(enteredPassword, this.password);
 };
+
+// Virtual populate bookings
+userSchema.virtual('name').get(function() {
+  return `${this.firstName} ${this.lastName}`.trim();
+});
 
 // Virtual populate bookings
 userSchema.virtual('bookings', {

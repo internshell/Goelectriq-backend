@@ -21,13 +21,22 @@ if (!fs.existsSync(uploadDir)) {
  */
 export const registerDriverPartner = async (req, res) => {
   try {
-    const { name, phone, experience } = req.body;
+    const { name, email, phone, experience } = req.body;
 
     // Validation
-    if (!name || !phone || !experience) {
+    if (!name || !email || !phone || !experience) {
       return res.status(400).json({
         success: false,
-        message: 'Name, phone, and experience are required',
+        message: 'Name, email, phone, and experience are required',
+      });
+    }
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide a valid email address',
       });
     }
 
@@ -40,12 +49,21 @@ export const registerDriverPartner = async (req, res) => {
       });
     }
 
-    // Check if driver already exists
+    // Check if driver already exists by phone
     const existingDriver = await Driver.findOne({ phone });
     if (existingDriver) {
       return res.status(400).json({
         success: false,
         message: 'A driver with this phone number already exists',
+      });
+    }
+
+    // Check if email already exists
+    const existingEmail = await Driver.findOne({ email });
+    if (existingEmail) {
+      return res.status(400).json({
+        success: false,
+        message: 'A driver with this email already exists',
       });
     }
 
@@ -63,6 +81,7 @@ export const registerDriverPartner = async (req, res) => {
     // Create basic driver registration (waiting for approval)
     const driverRegistration = {
       name,
+      email,
       phone,
       licenseNumber: `TEMP-${Date.now()}`, // Temporary, will be updated
       licenseExpiry: new Date(Date.now() + 10 * 365 * 24 * 60 * 60 * 1000), // Default 10 years
@@ -89,6 +108,7 @@ export const registerDriverPartner = async (req, res) => {
       data: {
         driverId: newDriver._id,
         phone: newDriver.phone,
+        email: newDriver.email,
         status: newDriver.status,
       },
     });

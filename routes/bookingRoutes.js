@@ -31,9 +31,6 @@ router.route('/:id')
 router.put('/:id/cancel', validateObjectId('id'), cancelBooking);
 router.get('/:id/invoice', validateObjectId('id'), downloadInvoice);
 
-// ===== ADMIN ROUTES (All require admin role) =====
-router.get('/admin/all-bookings', authorize('admin'), getAllBookings);
-
 // Admin actions for bookings
 router.put(
   '/:id/confirm',

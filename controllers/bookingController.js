@@ -25,6 +25,7 @@ export const createBooking = async (req, res) => {
       passengerDetails,
       distance,
       rideType,
+      airportType, // 'pickup' or 'drop' for airport rides
     } = req.body;
 
     console.log('📥 Creating booking with payload:', {
@@ -161,36 +162,68 @@ export const createBooking = async (req, res) => {
     let fareBreakdown;
     
     if (rideType === 'airport') {
-      // Airport rides use distance-based pricing: (Per-km Rate × Distance) + Parking Charge
-      console.log('✈️  Airport ride detected - Using distance-based pricing');
+      // Airport rides use FLAT RATE (fixed charge + parking), NOT distance-based
+      console.log('✈️  Airport ride detected - Using FLAT RATE pricing');
+      console.log('📍 Airport Type:', airportType || 'not specified');
+      console.log('💵 Pricing object structure:', JSON.stringify(pricing, null, 2));
       
-      const perKmRate = pricing.fixedCharge || 0; // Field renamed for airport rides
-      const parkingCharge = pricing.parkingCharge || 0;
-      const distanceFare = Math.round(perKmRate * distanceData.distance);
-      const subTotal = distanceFare + parkingCharge;
-      const gst = Math.round(subTotal * (pricing.gstPercentage / 100));
-      const totalFare = subTotal + gst;
+      // Get airport charges for specific ride type (pickup or drop)
+      const airportTypeKey = airportType || 'pickup'; // Default to pickup if not specified
+      
+      // Try to get airport charges from different possible locations in pricing object
+      let fixedCharge = 0;
+      let parkingCharge = 0;
+      
+      // Try airportCharges nested structure first
+      if (pricing.airportCharges && pricing.airportCharges[airportTypeKey]) {
+        fixedCharge = pricing.airportCharges[airportTypeKey].fixedCharge || 0;
+        parkingCharge = pricing.airportCharges[airportTypeKey].parkingCharge || 0;
+      }
+      // Try top-level fixedCharge/parkingCharge (only if explicitly set, not defaults)
+      else if (pricing.fixedCharge && pricing.fixedCharge > 0) {
+        fixedCharge = pricing.fixedCharge;
+        parkingCharge = pricing.parkingCharge || 0; // Only use if fixedCharge exists
+      }
+      // Last resort: use reasonable defaults if no pricing found
+      else {
+        console.warn('⚠️ No airport pricing found in database, using defaults');
+        fixedCharge = cabType === 'premium' ? 600 : 500;
+        parkingCharge = 0; // No parking charge for defaults (only fixed charge)
+      }
+      
+      console.log(`💰 Airport charges extracted - Fixed: ₹${fixedCharge}, Parking: ₹${parkingCharge}`);
+      
+      // Ensure no rounding issues - convert to numbers and calculate total
+      const cleanFixedCharge = Math.round(parseFloat(fixedCharge) * 100) / 100;
+      const cleanParkingCharge = Math.round(parseFloat(parkingCharge) * 100) / 100;
+      const subTotal = cleanFixedCharge + cleanParkingCharge;
+      const totalFare = subTotal; // No GST added - total is just the base amount
+      
+      console.log(`✅ Final calculation - Fixed: ₹${cleanFixedCharge}, Parking: ₹${cleanParkingCharge}, Total: ₹${totalFare}`);
       
       fareBreakdown = {
-        perKmRate,
-        distanceFare,
-        parkingCharge,
+        fixedCharge: cleanFixedCharge,       // FLAT RATE (not per-km)
+        parkingCharge: cleanParkingCharge,
+        distanceCharge: 0, // NO distance multiplier for flat-rate airport rides - REQUIRED field
+        nightCharge: 0,
+        waitingCharge: 0,
+        surgeCharge: 0,
         subTotal,
-        gst,
+        gst: 0, // No GST for airport rides
         totalFare,
         breakdownDetails: {
-          formula: `(${perKmRate}/km × ${distanceData.distance}km) + ${parkingCharge} = ${subTotal}`,
+          formula: `Fixed Charge (₹${cleanFixedCharge}) + Parking (₹${cleanParkingCharge}) = ₹${totalFare}`,
+          airportType: airportTypeKey,
           components: {
-            'Distance Fare': distanceFare,
+            'Fixed Charge': fixedCharge,
             'Parking Charge': parkingCharge,
-            'GST': gst,
           }
         }
       };
       
-      console.log('💰 Airport fare calculated:', fareBreakdown);
+      console.log('💰 Airport fare calculated (FLAT RATE):', fareBreakdown);
     } else {
-      // Regular rides use normal fare calculation
+      // Regular rides use normal per-km fare calculation
       fareBreakdown = calculateFare(
         pricing,
         distanceData.distance,
@@ -198,7 +231,36 @@ export const createBooking = async (req, res) => {
       );
     }
 
-    // ===== STAGE 4: CREATE BOOKING WITH ALL VALIDATED DATA =====
+    // ===== STAGE 4A: VALIDATE FARE BREAKDOWN =====
+    console.log('🔍 Validating fare breakdown:', {
+      totalFare: fareBreakdown?.totalFare,
+      subTotal: fareBreakdown?.subTotal,
+      isNaN: isNaN(fareBreakdown?.totalFare),
+      lessOrEqual0: fareBreakdown?.totalFare <= 0,
+    });
+
+    if (!fareBreakdown || isNaN(fareBreakdown.totalFare) || fareBreakdown.totalFare <= 0) {
+      console.error('❌ Invalid fare breakdown calculated:', fareBreakdown);
+      console.error('📊 Pricing data available:', {
+        hasPricing: !!pricing,
+        pricingData: pricing,
+        rideType,
+        cabType,
+        distance: distanceData?.distance,
+      });
+      return res.status(400).json({
+        success: false,
+        message: `Failed to calculate valid fare. Total fare: ${fareBreakdown?.totalFare}`,
+        details: {
+          fareBreakdown,
+          suggestion: 'Please check pricing configuration for ' + cabType + ' vehicles'
+        }
+      });
+    }
+
+    console.log('✅ Fare breakdown validated - Total: ₹' + fareBreakdown.totalFare);
+
+    // ===== STAGE 4B: CREATE BOOKING WITH ALL VALIDATED DATA =====
     const booking = await Booking.create({
       bookingId: `BK${Date.now()}`,
       user: req.user._id,
@@ -208,6 +270,7 @@ export const createBooking = async (req, res) => {
       duration: distanceData.duration || 0,
       cabType,
       rideType: rideType || 'local', // local, airport, intercity
+      airportType: rideType === 'airport' ? airportType : null, // 'pickup' or 'drop' for airport rides
       scheduledDate: new Date(scheduledDate),
       scheduledTime,
       pricing: fareBreakdown,
@@ -248,11 +311,17 @@ export const createBooking = async (req, res) => {
       data: booking,
     });
   } catch (error) {
-    console.error('❌ Create booking error:', error);
+    console.error('❌ Create booking error:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name,
+      ...(error.errors && { validationErrors: error.errors })
+    });
     res.status(500).json({
       success: false,
       message: 'Error creating booking',
       error: error.message,
+      ...(process.env.NODE_ENV === 'development' && { stack: error.stack })
     });
   }
 };
@@ -269,9 +338,11 @@ export const getMyBookings = async (req, res) => {
     const skip = (page - 1) * limit;
 
     const query = { 
-      user: req.user._id
-      // NOTE: Removed paymentStatus filter to show all bookings regardless of payment status
-      // paymentStatus: 'paid'  // Only show bookings with completed payments
+      user: req.user._id,
+      // 🔑 IMPORTANT: Only show bookings where 20% advance payment is made
+      // Exclude bookings with paymentStatus='pending' (no payment made yet)
+      // This ensures bookings only appear after payment is initiated
+      paymentStatus: { $ne: 'pending' }
     };
 
     // Filter by status if provided
@@ -286,10 +357,11 @@ export const getMyBookings = async (req, res) => {
       .limit(limit)
       .lean(); // Use lean for faster queries and complete data return
 
-    console.log('📊 Fetching bookings:', { 
+    console.log('📊 Fetching user bookings (20% Advance Payment System):', { 
       userId: req.user._id, 
       query, 
       count: bookings.length,
+      note: 'Only bookings with 20% advance payment appear here (paymentStatus != pending)',
       sampleBooking: bookings[0] ? {
         _id: bookings[0]._id,
         type: bookings[0].cabType || bookings[0].type,
@@ -749,6 +821,56 @@ export const getAllBookings = async (req, res) => {
   }
 };
 
+// GET AIRPORT BOOKINGS
+export const getAirportBookings = async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 50;
+    const skip = parseInt(req.query.page) ? (parseInt(req.query.page) - 1) * limit : 0;
+
+    // Fetch only airport bookings, sorted by date (newest first)
+    const bookings = await Booking.find({ rideType: 'airport' })
+      .populate('user', 'name phone email')
+      .select('user carType rideType airportType totalFare paidAmount paymentStatus createdAt pickupLocation dropLocation')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const total = await Booking.countDocuments({ rideType: 'airport' });
+
+    // Format bookings for frontend
+    const formattedBookings = bookings.map((booking) => ({
+      _id: booking._id,
+      userId: booking.user,
+      userName: booking.user?.name || 'Unknown',
+      userPhone: booking.user?.phone || 'N/A',
+      carType: booking.carType || 'N/A',
+      rideType: booking.rideType,
+      airportType: booking.airportType || 'pickup',
+      totalFare: booking.totalFare || 0,
+      paidAmount: booking.paidAmount || 0,
+      paymentStatus: booking.paymentStatus || 'pending',
+      createdAt: booking.createdAt,
+      pickupLocation: booking.pickupLocation?.address || 'N/A',
+      dropLocation: booking.dropLocation?.address || 'N/A',
+    }));
+
+    res.status(200).json({
+      success: true,
+      bookings: formattedBookings,
+      total,
+      page: parseInt(req.query.page) || 1,
+    });
+  } catch (error) {
+    console.error('Error fetching airport bookings:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching airport bookings',
+      error: error.message,
+    });
+  }
+};
+
 export default {
   createBooking,
   getMyBookings,
@@ -759,4 +881,5 @@ export default {
   completeBooking,
   collectPayment,
   getAllBookings,
+  getAirportBookings,
 };

@@ -66,6 +66,12 @@ const bookingSchema = new mongoose.Schema(
       default: 'local',
       description: 'Type of ride for payment rule application',
     },
+    airportType: {
+      type: String,
+      enum: ['pickup', 'drop'],
+      description: 'For airport rides: pickup from airport or drop to airport',
+      default: null,
+    },
     scheduledDate: {
       type: Date,
       required: true,
@@ -77,15 +83,31 @@ const bookingSchema = new mongoose.Schema(
     pricing: {
       baseFare: {
         type: Number,
-        required: true,
+        required: function() {
+          // baseFare is only required for non-airport rides
+          return this.rideType !== 'airport';
+        },
       },
       perKmRate: {
         type: Number,
-        required: true,
+        required: function() {
+          // perKmRate is only required for non-airport rides
+          return this.rideType !== 'airport';
+        },
       },
       distanceCharge: {
         type: Number,
         required: true,
+      },
+      fixedCharge: {
+        type: Number,
+        default: 0,
+        description: 'For airport rides: flat rate (not per-km)',
+      },
+      parkingCharge: {
+        type: Number,
+        default: 0,
+        description: 'Parking fee for airport rides',
       },
       nightCharge: {
         type: Number,
