@@ -1,5 +1,7 @@
 import TourBooking from '../models/TourBooking.js';
 import Package from '../models/Package.js';
+import User from '../models/User.js';
+import { sendTourBookingNotification } from '../services/whatsappService.js';
 
 /**
  * Create a tour package booking (user)
@@ -100,6 +102,14 @@ export const createTourBooking = async (req, res) => {
     const populated = await TourBooking.findById(booking._id)
       .populate('package', 'title coverImage tourCategory basePrice pricing location')
       .populate('user', 'name email phone');
+
+    // Send WhatsApp notification to user and admin
+    try {
+      await sendTourBookingNotification(populated, populated.user);
+    } catch (whatsappError) {
+      console.error('⚠️ WhatsApp notification failed:', whatsappError.message);
+      // Don't fail the booking if WhatsApp fails - just log it
+    }
 
     res.status(201).json({
       success: true,

@@ -2,6 +2,7 @@ import express from 'express';
 import {
   registerUser,
   loginUser,
+  loginAdmin,
   registerDriver,
   loginDriver,
   googleAuth,
@@ -18,6 +19,7 @@ const router = express.Router();
 // Public routes
 router.post('/register', authLimiter, registerUser);
 router.post('/login', authLimiter, loginUser);
+router.post('/admin-login', authLimiter, loginAdmin);
 router.post('/google', authLimiter, googleAuth);
 router.post('/register-driver', authLimiter, registerDriver);
 router.post('/login-driver', authLimiter, loginDriver);

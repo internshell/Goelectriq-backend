@@ -4,9 +4,25 @@ import axios from 'axios';
  * WhatsApp Cloud API Configuration
  */
 const whatsappConfig = {
-  apiUrl: process.env.WHATSAPP_API_URL,
+  apiUrl: process.env.WHATSAPP_API_URL ? process.env.WHATSAPP_API_URL.replace(/\/$/, '') : null,
   phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID,
   accessToken: process.env.WHATSAPP_ACCESS_TOKEN,
+};
+
+/**
+ * Validate WhatsApp configuration
+ */
+const validateWhatsAppConfig = () => {
+  const missing = [];
+  if (!whatsappConfig.apiUrl) missing.push('WHATSAPP_API_URL');
+  if (!whatsappConfig.phoneNumberId) missing.push('WHATSAPP_PHONE_NUMBER_ID');
+  if (!whatsappConfig.accessToken) missing.push('WHATSAPP_ACCESS_TOKEN');
+  
+  if (missing.length > 0) {
+    console.warn(`⚠️ WhatsApp configuration incomplete. Missing: ${missing.join(', ')}`);
+    return false;
+  }
+  return true;
 };
 
 /**
@@ -14,6 +30,12 @@ const whatsappConfig = {
  */
 export const sendWhatsAppMessage = async (to, message) => {
   try {
+    // Validate configuration - if missing, just warn and return gracefully
+    if (!validateWhatsAppConfig()) {
+      console.info('ℹ️ WhatsApp not configured - skipping message to', to);
+      return { success: false, reason: 'WhatsApp not configured' };
+    }
+
     // Remove +91 prefix if present and ensure 10 digit number
     const phoneNumber = to.replace(/^\+91/, '').replace(/\D/g, '');
     
@@ -41,8 +63,9 @@ export const sendWhatsAppMessage = async (to, message) => {
     console.log(`✅ WhatsApp message sent to ${formattedNumber}`);
     return response.data;
   } catch (error) {
+    // Log error but don't throw - allow booking to proceed
     console.error('❌ WhatsApp sending error:', error.response?.data || error.message);
-    throw new Error('Failed to send WhatsApp message');
+    return { success: false, error: error.message };
   }
 };
 
@@ -51,6 +74,12 @@ export const sendWhatsAppMessage = async (to, message) => {
  */
 export const sendWhatsAppTemplate = async (to, templateName, parameters) => {
   try {
+    // Validate configuration - if missing, just warn and return gracefully
+    if (!validateWhatsAppConfig()) {
+      console.info('ℹ️ WhatsApp not configured - skipping template message to', to);
+      return { success: false, reason: 'WhatsApp not configured' };
+    }
+
     const phoneNumber = to.replace(/^\+91/, '').replace(/\D/g, '');
     const formattedNumber = `91${phoneNumber}`;
 
@@ -87,8 +116,9 @@ export const sendWhatsAppTemplate = async (to, templateName, parameters) => {
     console.log(`✅ WhatsApp template sent to ${formattedNumber}`);
     return response.data;
   } catch (error) {
+    // Log error but don't throw - allow booking to proceed
     console.error('❌ WhatsApp template error:', error.response?.data || error.message);
-    throw new Error('Failed to send WhatsApp template');
+    return { success: false, error: error.message };
   }
 };
 

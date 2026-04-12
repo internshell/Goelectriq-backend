@@ -3,7 +3,9 @@ import Payment from '../models/Payment.js';
 import Booking from '../models/Booking.js';
 import TourBooking from '../models/TourBooking.js';
 import Driver from '../models/Driver.js';
+import User from '../models/User.js';
 import crypto from 'crypto';
+import { sendRidePaymentSuccessWhatsApp, sendTourPaymentSuccessWhatsApp } from '../services/whatsappService.js';
 
 export const createPaymentOrder = async (req, res) => {
   try {
@@ -449,6 +451,17 @@ export const verifyRidePayment = async (req, res) => {
           totalFare: totalFare,
           advanceAmount: advanceAmount
         });
+
+        // Send WhatsApp notification if payment was successful
+        if (payment.status === 'success') {
+          try {
+            await booking.populate('user', 'name email phone');
+            await sendRidePaymentSuccessWhatsApp(booking, booking.user, payment._id);
+          } catch (whatsappError) {
+            console.error('⚠️ WhatsApp notification failed:', whatsappError.message);
+            // Don't fail the payment if WhatsApp fails
+          }
+        }
       } else {
         console.error('❌ Booking not found for payment:', payment.booking);
       }
@@ -616,6 +629,17 @@ export const verifyTourPayment = async (req, res) => {
           paymentStatus: booking.paymentStatus,
           paymentDetails: booking.paymentDetails
         });
+
+        // Send WhatsApp notification if payment was successful
+        if (payment.status === 'success') {
+          try {
+            await booking.populate('user', 'name email phone');
+            await sendTourPaymentSuccessWhatsApp(booking, booking.user, payment._id);
+          } catch (whatsappError) {
+            console.error('⚠️ WhatsApp notification failed:', whatsappError.message);
+            // Don't fail the payment if WhatsApp fails
+          }
+        }
       } else {
         console.error('❌ Tour booking not found for payment:', payment.tourBooking);
       }

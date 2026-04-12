@@ -191,6 +191,15 @@ export const loginUser = async (req, res) => {
       });
     }
 
+    // Check if user is admin - admins must use admin login
+    if (user.role === 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Admin users must login from the admin login page',
+        isAdmin: true,
+      });
+    }
+
     // Generate token
     if (!process.env.JWT_SECRET) {
       throw new Error('JWT_SECRET is not configured. Add it to your .env file.');
@@ -218,6 +227,103 @@ export const loginUser = async (req, res) => {
     });
   } catch (error) {
     console.error('Login error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Error logged in',
+    });
+  }
+};
+
+/**
+ * @desc    Login admin
+ * @route   POST /api/auth/admin-login
+ * @access  Public
+ */
+export const loginAdmin = async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    // Validate input
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide both email and password',
+      });
+    }
+
+    // Validate email format
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide a valid email address',
+      });
+    }
+
+    const emailLower = String(email).toLowerCase().trim();
+
+    // Find user (include password for verification)
+    const user = await User.findOne({ email: emailLower }).select('+password');
+
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid email or password',
+      });
+    }
+
+    // Check if user is actually an admin
+    if (user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Unauthorized. This login is for admins only',
+      });
+    }
+
+    // Check if account is active
+    if (!user.isActive) {
+      return res.status(403).json({
+        success: false,
+        message: 'Your account has been deactivated. Please contact support.',
+      });
+    }
+
+    // Verify password
+    const isPasswordValid = await user.matchPassword(password);
+
+    if (!isPasswordValid) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid email or password',
+      });
+    }
+
+    // Generate token
+    if (!process.env.JWT_SECRET) {
+      throw new Error('JWT_SECRET is not configured. Add it to your .env file.');
+    }
+    const token = generateToken(user._id, user.role);
+
+    res.status(200).json({
+      success: true,
+      message: 'Admin login successful',
+      data: {
+        user: {
+          id: user._id,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          name: user.name,
+          email: user.email,
+          phone: user.phone,
+          role: user.role,
+          profileImage: user.profileImage,
+          isEmailVerified: user.isEmailVerified,
+          isPhoneVerified: user.isPhoneVerified,
+        },
+        token,
+      },
+    });
+  } catch (error) {
+    console.error('Admin login error:', error);
     res.status(500).json({
       success: false,
       message: error.message || 'Error logging in',

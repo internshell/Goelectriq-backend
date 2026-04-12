@@ -39,6 +39,7 @@ import feedbackRoutes from './routes/feedbackRoutes.js';
 import offerRoutes from './routes/offerRoutes.js';
 import partnerRoutes from './routes/partnerRoutes.js';
 import chargingBookingRoutes from './routes/chargingBookingRoutes.js';
+import chargingEnquiryRoutes from './routes/chargingEnquiryRoutes.js';
 
 // Get __dirname equivalent in ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -160,6 +161,7 @@ app.use('/api/feedback', feedbackRoutes);
 app.use('/api/offers', offerRoutes);
 app.use('/api/partners', partnerRoutes);
 app.use('/api/charging-bookings', chargingBookingRoutes);
+app.use('/api/charging-enquiries', chargingEnquiryRoutes);
 
 // Welcome route
 app.get('/', (req, res) => {

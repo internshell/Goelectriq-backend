@@ -4,10 +4,8 @@ import User from '../models/User.js';
 import Driver from '../models/Driver.js';
 import { calculateDistanceWithGoogleMaps } from '../utils/distanceCalculator.js';
 import { calculateFare } from '../utils/fareCalculator.js';
-// TODO: enable when email/WhatsApp needed
-// import { sendBookingConfirmationEmail } from '../services/emailService.js';
-// import { sendBookingConfirmationWhatsApp } from '../services/whatsappService.js';
 import { generateInvoicePDF } from '../utils/pdfGenerator.js';
+import { sendRideBookingNotification } from '../services/whatsappService.js';
 
 /**
  * @desc    Create new booking
@@ -301,9 +299,13 @@ export const createBooking = async (req, res) => {
     // Populate user details
     await booking.populate('user', 'name email phone');
 
-    // TODO: enable when email/WhatsApp needed
-    // sendBookingConfirmationEmail(booking, req.user).catch(err => console.error('Email error:', err));
-    // sendBookingConfirmationWhatsApp(booking, req.user).catch(err => console.error('WhatsApp error:', err));
+    // Send WhatsApp notification to user and admin
+    try {
+      await sendRideBookingNotification(booking, booking.user);
+    } catch (whatsappError) {
+      console.error('⚠️ WhatsApp notification failed:', whatsappError.message);
+      // Don't fail the booking if WhatsApp fails - just log it
+    }
 
     res.status(201).json({
       success: true,
