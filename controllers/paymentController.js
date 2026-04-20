@@ -7,15 +7,58 @@ import User from '../models/User.js';
 import crypto from 'crypto';
 import { sendRidePaymentSuccessWhatsApp, sendTourPaymentSuccessWhatsApp } from '../services/whatsappService.js';
 
+// Helper function to validate MongoDB ObjectId
+const isValidObjectId = (id) => {
+  return id && /^[0-9a-fA-F]{24}$/.test(id);
+};
+
 export const createPaymentOrder = async (req, res) => {
   try {
     const { bookingId } = req.body;
+    
+    // Validate bookingId format
+    if (!bookingId) {
+      return res.status(400).json({
+        success: false,
+        message: 'bookingId is required'
+      });
+    }
+    
+    if (!isValidObjectId(bookingId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid booking ID format. Must be a valid MongoDB ObjectId (24 character hex string)',
+        received: bookingId
+      });
+    }
+    
     const booking = await Booking.findById(bookingId);
     
     if (!booking) {
+      console.error(`❌ Booking not found for ID: ${bookingId}`);
       return res.status(404).json({ 
         success: false, 
-        message: 'Booking not found' 
+        message: 'Booking not found',
+        details: {
+          bookingId: bookingId,
+          suggestion: 'Please ensure the booking ID is correct and the booking has been created',
+          step1: 'First create a booking using POST /api/bookings',
+          step2: 'Copy the _id from the response',
+          step3: 'Use that _id in this payment request'
+        }
+      });
+    }
+    
+    // Check if booking has valid pricing
+    if (!booking.pricing || !booking.pricing.totalFare) {
+      console.error(`❌ Booking has invalid pricing:`, booking.pricing);
+      return res.status(400).json({
+        success: false,
+        message: 'Booking pricing not calculated properly',
+        details: {
+          bookingId: bookingId,
+          pricing: booking.pricing
+        }
       });
     }
     
@@ -43,7 +86,12 @@ export const createPaymentOrder = async (req, res) => {
       },
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    console.error('Payment order creation error:', error.message);
+    res.status(500).json({ 
+      success: false, 
+      message: error.message,
+      errorType: error.name
+    });
   }
 };
 
@@ -239,6 +287,7 @@ export const createRidePaymentOrder = async (req, res) => {
   try {
     const { bookingId, amount, rideType, pickupLocation, dropLocation } = req.body;
     
+    // Validate required fields
     if (!bookingId || !amount) {
       return res.status(400).json({
         success: false,
@@ -246,11 +295,42 @@ export const createRidePaymentOrder = async (req, res) => {
       });
     }
     
+    // Validate bookingId format
+    if (!isValidObjectId(bookingId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid booking ID format. Must be a valid MongoDB ObjectId (24 character hex string)',
+        received: bookingId,
+        example: '6547a9f8c5d2e1b9a4f3c2d1'
+      });
+    }
+    
     const booking = await Booking.findById(bookingId);
     if (!booking) {
+      console.error(`❌ Booking not found for ID: ${bookingId}`);
       return res.status(404).json({
         success: false,
-        message: 'Booking not found'
+        message: 'Booking not found',
+        details: {
+          bookingId: bookingId,
+          suggestion: 'Please ensure the booking ID is correct and the booking has been created',
+          step1: 'First create a booking using POST /api/bookings',
+          step2: 'Copy the _id from the response',
+          step3: 'Use that _id in this payment request'
+        }
+      });
+    }
+    
+    // Check if booking has valid pricing
+    if (!booking.pricing || !booking.pricing.totalFare) {
+      console.error(`❌ Booking has invalid pricing:`, booking.pricing);
+      return res.status(400).json({
+        success: false,
+        message: 'Booking pricing not calculated properly',
+        details: {
+          bookingId: bookingId,
+          pricing: booking.pricing
+        }
       });
     }
     
@@ -502,11 +582,42 @@ export const createTourPaymentOrder = async (req, res) => {
       });
     }
     
+    // Validate tourBookingId format
+    if (!isValidObjectId(tourBookingId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid tour booking ID format. Must be a valid MongoDB ObjectId (24 character hex string)',
+        received: tourBookingId,
+        example: '6547a9f8c5d2e1b9a4f3c2d1'
+      });
+    }
+    
     const booking = await TourBooking.findById(tourBookingId);
     if (!booking) {
+      console.error(`❌ Tour Booking not found for ID: ${tourBookingId}`);
       return res.status(404).json({
         success: false,
-        message: 'Tour Booking not found'
+        message: 'Tour Booking not found',
+        details: {
+          tourBookingId: tourBookingId,
+          suggestion: 'Please ensure the tour booking ID is correct and the booking has been created',
+          step1: 'First create a tour booking using POST /api/tour-bookings',
+          step2: 'Copy the _id from the response',
+          step3: 'Use that _id in this payment request'
+        }
+      });
+    }
+    
+    // Check if booking has valid pricing/amount
+    if (!booking.pricing || !booking.pricing.totalFare) {
+      console.error(`❌ Tour Booking has invalid pricing:`, booking.pricing);
+      return res.status(400).json({
+        success: false,
+        message: 'Tour Booking pricing not calculated properly',
+        details: {
+          tourBookingId: tourBookingId,
+          pricing: booking.pricing
+        }
       });
     }
     

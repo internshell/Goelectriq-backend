@@ -46,8 +46,8 @@ export const changePassword = async (req, res) => {
       });
     }
 
-    // Get user with password field
-    const user = await User.findById(req.user._id);
+    // Get user with password field (use +password to include excluded field)
+    const user = await User.findById(req.user._id).select('+password');
     if (!user) {
       return res.status(404).json({
         success: false,

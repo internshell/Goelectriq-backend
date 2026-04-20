@@ -7,6 +7,7 @@ import {
 } from '../controllers/chargingBookingController.js';
 import { protect } from '../middleware/auth.js';
 import { isAdmin } from '../middleware/roleCheck.js';
+import { validateObjectId } from '../middleware/validation.js';
 
 const router = express.Router();
 
@@ -29,13 +30,13 @@ router.get('/', protect, isAdmin, getAllChargingBookings);
  * @desc    Update booking status
  * @access  Private (Admin)
  */
-router.put('/:id', protect, isAdmin, updateChargingBooking);
+router.put('/:id', protect, isAdmin, validateObjectId('id'), updateChargingBooking);
 
 /**
  * @route   DELETE /api/charging-bookings/:id
  * @desc    Delete booking
  * @access  Private (Admin)
  */
-router.delete('/:id', protect, isAdmin, deleteChargingBooking);
+router.delete('/:id', protect, isAdmin, validateObjectId('id'), deleteChargingBooking);
 
 export default router;

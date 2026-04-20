@@ -8,6 +8,7 @@ import {
 } from '../controllers/chargingEnquiryController.js';
 import { protect } from '../middleware/auth.js';
 import { isAdmin } from '../middleware/roleCheck.js';
+import { validateObjectId } from '../middleware/validation.js';
 
 const router = express.Router();
 
@@ -30,20 +31,20 @@ router.get('/', protect, isAdmin, getAllChargingEnquiries);
  * @desc    Get single charging enquiry
  * @access  Private (Admin)
  */
-router.get('/:id', protect, isAdmin, getChargingEnquiry);
+router.get('/:id', protect, isAdmin, validateObjectId('id'), getChargingEnquiry);
 
 /**
  * @route   PUT /api/charging-enquiries/:id
  * @desc    Update charging enquiry
  * @access  Private (Admin)
  */
-router.put('/:id', protect, isAdmin, updateChargingEnquiry);
+router.put('/:id', protect, isAdmin, validateObjectId('id'), updateChargingEnquiry);
 
 /**
  * @route   DELETE /api/charging-enquiries/:id
  * @desc    Delete charging enquiry
  * @access  Private (Admin)
  */
-router.delete('/:id', protect, isAdmin, deleteChargingEnquiry);
+router.delete('/:id', protect, isAdmin, validateObjectId('id'), deleteChargingEnquiry);
 
 export default router;
